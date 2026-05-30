@@ -1,0 +1,23 @@
+name: pytorchCPU
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.7
+  - pytorch
+  - torchvision
+  - torchaudio
+  - numpy
+  - scipy
+  - pandas
+  - ipython
+  - flake8
+  - pytest
+  - scikit-learn
+  - seaborn
+  - pip
+  - mpi4py
+  - h5py
+  - pip:
+    - pytest-cov
+    - torchinfo

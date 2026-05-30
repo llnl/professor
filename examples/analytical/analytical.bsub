@@ -1,0 +1,46 @@
+#!/bin/bash
+#BSUB -nnodes 1
+#BSUB -J fourtrainer
+#BSUB -W 00:45
+#BSUB -q pbatch
+#BSUB -alloc_flags ipisolate
+#BSUB -o mltrainer_%J.out
+#BSUB -e mltrainer_%J.err
+
+module load cuda/11.8.0
+
+EXE=/usr/workspace/prof/opence1.7.2/bin/prof-trainer
+PFOLDER=/p/gpfs1/$USER/models/analytical
+DATA_FOLDER=/p/gpfs1/$USER/analytical_example
+
+mkdir -p $PFOLDER
+cd $PFOLDER
+
+export LOSS_TARGET=l1
+export BATCH_SIZE=42
+export MAX_FEATURE=1024
+export MIN_FEATURE=128
+export LR=1e-5
+
+export DATSET_FILE=filelist
+
+mkdir -p $PFOLDER/runs
+export RUN_DIR=${PFOLDER}/runs/${DATSET_FILE}_${BATCH_SIZE}_${MAX_FEATURE}_${MIN_FEATURE}_${LR}
+
+# this uses 4 gpus per Node!
+jsrun -r 4 $EXE \
+    --lr $LR \
+    --batch_size $BATCH_SIZE \
+    --num_epochs 25 \
+    --max_feature ${MAX_FEATURE} \
+    --min_feature ${MIN_FEATURE} \
+    --loss_target ${LOSS_TARGET} \
+    --n_checkpoint 5 \
+    --dataset_path ${DATA_FOLDER} \
+    --keys 'density' \
+    --dataset_file ${DATSET_FILE}'.txt' \
+    --dataset_type 0  \
+    --y_kernel 4 \
+    --x_kernel 4 \
+    --n_sims 2000000 \
+    --run_directory $RUN_DIR

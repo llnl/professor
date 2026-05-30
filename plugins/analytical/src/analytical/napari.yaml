@@ -1,0 +1,10 @@
+name: analytical
+display_name: Analytical
+contributions:
+  commands:
+    - id: analytical.make_qwidget
+      python_name: analytical._widget:AnalyticalWidget
+      title: Analytical
+  widgets:
+    - command: analytical.make_qwidget
+      display_name: Analytical

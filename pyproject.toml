@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "professor"
+dynamic = ["version"]
+authors = [
+    { name = "Charles Jekel", email = "jekel11@llnl.gov" },
+]
+description = "Professor - A Machine Learning Visualization Library"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=1.12.1",
+    "torchvision",
+    "torchinfo>=1.8.0",
+    "omegaconf>=2.3.0",
+    "schema>=0.7.5",
+    "torchlayers",
+    "kornia",
+    "wheel",
+]
+license = "Apache-2.0 WITH LLVM-exception"
+
+[project.optional-dependencies]
+trainer = [
+    "h5py",
+    "mpi4py",
+    "scikit-learn",
+    "tensorboard",
+]
+
+
+# Note: Some systems have issues installing qtpy6, so consider using napari[pyside,optional]
+#       instead of napari[all] (pyside has a more permissive license, better support, also leverages qt)
+gui = [
+    "napari>=0.4.18; platform_machine != 'x86_64'",
+    # "napari[all]>=0.4.18; platform_machine == 'x86_64'",
+    "napari[optional,pyside]>=0.4.18; platform_machine == 'x86_64'",
+    "matplotlib>=3.7.1",
+    "numpy>=1.23.5",
+    "pandas>=1.5.3",
+]
+all = [
+    "professor[trainer,gui]",
+]
+dev = [
+    "professor[all]",
+    "pytest>=7.1.3",
+    "pytest-cov",
+    "pytest-mock>=3.11.1",
+    "pytest-qt",
+    "mkdocs-material>=9.5.4",
+    "flake8",
+    "Flake8-pyproject",
+    "mkdocs",
+]
+
+[project.scripts]
+prof-trainer = "professor.__main__:prof_trainer"
+
+[project.gui-scripts]
+prof-vis = "professor.vela.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "professor.__version__"}
+
+[tool.flake8]
+max-line-length = 120
+
+[tool.black]
+line-length = 120
+
+[tool.ruff]
+line-length = 120
+
+[tool.setuptools.package-data]
+"*" = ["py.typed", "*.yaml"]
+
+[tool.pyright]
+reportUnknownMemberType = "none"
+reportMissingParameterType = "error"
+exclude = [
+    "build",
+    "src/**/dist",
+    "src/*.egg-info",
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.*"
+]

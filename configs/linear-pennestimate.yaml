@@ -1,0 +1,77 @@
+model:
+  pytorch:
+    name: Linear Shaped Charge
+    checkpoints:
+      - /usr/workspace/prof/models/linearshapedmodel.pt
+    devices:
+      - 0 
+    seed: 1231
+    dimensions:
+      n_inputs: 6
+      batch_size: 1
+      y_pixels: 512
+      x_pixels: 1664
+    invocation:
+      target: professor.torch_models.Generator
+      params:
+        input_size: ${model.pytorch.dimensions.n_inputs}
+        im_size: ${model.pytorch.dimensions.x_pixels}
+        num_channels: 7
+        max_features: 1024
+        min_features: 128
+        first_layer:
+          invocation:
+            target: torch.nn.Identity
+        last_layer: 
+          invocation:
+            target: professor.layers.AlphaLinear
+            params: 
+              n_channels: ${model.pytorch.invocation.params.num_channels}
+        act_fun: "ReLU"
+        y_kernel: 4
+        x_kernel: 13
+        last_bias: True
+    execution:
+      half_precision: True
+      jit: True
+
+gui:
+  napari:
+    fields:
+      - density
+      - velocity_x
+      - velocity_y
+      - pressure
+      - energy
+      - volume_fraction_003
+      - density_003
+    sliders:
+      P1:
+        lower_bound: 0.05
+        upper_bound: 0.3
+        initial_value: 0.175
+      P2:
+        lower_bound: 0.05
+        upper_bound: 0.3
+        initial_value: 0.175
+      P3:
+        lower_bound: 0.05
+        upper_bound: 0.3
+        initial_value: 0.175
+      P4:
+        lower_bound: 0.05
+        upper_bound: 0.3
+        initial_value: 0.175 
+      Det:
+        lower_bound: 0.0
+        upper_bound: 1.0
+        initial_value: 0.0
+      Time:
+        lower_bound: 0.0
+        upper_bound: 20.0
+        initial_value: 0.0
+    plugins:
+      custom-widget:
+        auto_load: True
+        target: pennestimate.pennetration_estimate.PenetrationCalculation
+        widget: professor.vela.plugins.SimpleWidget

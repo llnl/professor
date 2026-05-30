@@ -1,0 +1,65 @@
+model:
+  pytorch:
+    name: Rayleigh Taylor
+    checkpoints:
+      # - /usr/workspace/prof/rt_models/0000.pt
+      # - /usr/workspace/prof/rt_models/0025.pt
+      # - /usr/workspace/prof/rt_models/0050.pt
+      - /usr/workspace/prof/rt_models/0100.pt
+    devices:
+      - 0
+    seed: 1231
+    dimensions:
+      n_inputs: 4
+      batch_size: 1
+      y_pixels: 768
+      x_pixels: 256
+    invocation:
+      target: professor.torch_models.Generator
+      params:
+        input_size: ${model.pytorch.dimensions.n_inputs}
+        im_size: ${model.pytorch.dimensions.y_pixels}
+        num_channels: 6
+        max_features: 1024
+        min_features: 128
+        first_layer:
+          invocation:
+            target: torch.nn.Identity
+        last_layer: 
+          invocation:
+            target: professor.layers.AlphaLinear
+            params:
+              n_channels: ${model.pytorch.invocation.params.num_channels}
+        act_fun: "ReLU"
+        y_kernel: 3
+        x_kernel: 1
+    execution:
+      half_precision: True
+      jit: True
+
+gui:
+  napari:
+    fields:
+      - density
+      - velocity_x
+      - velocity_y
+      - pressure
+      - energy
+      - materials
+    sliders:
+      ρ₁ / ρ₂:
+        lower_bound: 1.1
+        upper_bound: 6.7
+        initial_value: 3.900
+      γ:
+        lower_bound: 1.1
+        upper_bound: 1.6
+        initial_value: 1.35
+      Initial Velocity:
+        lower_bound: 0.6
+        upper_bound: 10.0
+        initial_value: 5.3
+      Time:
+        lower_bound: 0.0
+        upper_bound: 10.0
+        initial_value: 0.0

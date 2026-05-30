@@ -1,0 +1,71 @@
+model:
+  pytorch:
+    name: HV Impact PCHIP RHS
+    checkpoints:
+      # - pchip075.pt
+      - /usr/workspace/prof/models/hv_impact_pchip_aws_0300.pt
+    devices:
+      - 0
+    seed: 1231
+    dimensions:
+      n_inputs: 6
+      batch_size: 1
+      y_pixels: 1024
+      x_pixels: 1024
+    invocation:
+      target: professor.torch_models.Generator
+      params:
+        input_size: ${model.pytorch.dimensions.n_inputs}
+        im_size: ${model.pytorch.dimensions.x_pixels}
+        num_channels: 6
+        max_features: 1024
+        min_features: 128
+        first_layer:
+          invocation:
+            target: torch.nn.Identity
+        last_layer: 
+          invocation:
+            target: professor.layers.AlphaLinear
+            params:
+              n_channels: ${model.pytorch.invocation.params.num_channels}
+        act_fun: "ReLU"
+        y_kernel: 4
+        x_kernel: 4
+    execution:
+      half_precision: False
+      jit: False
+
+gui:
+  napari:
+    fields:
+      - density
+      - velocity_x
+      - velocity_y
+      - materials
+      - energy
+      - pressure
+    sliders:
+      P1:
+        lower_bound: -0.25
+        upper_bound: 0.25
+        initial_value: -0.125
+      P2:
+        lower_bound: -0.25
+        upper_bound: 0.25
+        initial_value: 0.125
+      P3:
+        lower_bound: -0.25
+        upper_bound: 0.25
+        initial_value: -0.125
+      P4:
+        lower_bound: -0.25
+        upper_bound: 0.25
+        initial_value: 0.125
+      Vel:
+        lower_bound: 0.18
+        upper_bound: 0.22
+        initial_value: 0.2
+      Time:
+        lower_bound: 0.0
+        upper_bound: 15.0
+        initial_value: 0.0

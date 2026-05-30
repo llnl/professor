@@ -1,0 +1,107 @@
+# model (dict): Contains key, value pairs related to the model
+model:
+  pytorch:
+    # name (str): The display name for the model
+    name: Taylor Green Vortex
+    # checkpoints (str): The absolute path to the model weights, add a new row for multiple checkpoints of the same model.
+    checkpoints:
+      - /usr/workspace/prof/models/tg-vortex-analytical/taylor-green-0150.pt
+    # devices (int): the device number to load the corresponding checkpoint onto.
+    devices:
+      - 0
+    # seed (int): The seed used for number generation
+    seed: 1231
+    # dimensions (dict): Contains key, value pairs related to model dimensions
+    dimensions:
+      # n_inputs (int): The number of of inputs to the model.
+      n_inputs: 4
+      # batch_size (int): The batch size for the model.
+      batch_size: 1
+      # y_pixels (int): The amount of image pixels in the y dimension.
+      y_pixels: 512
+      # x_pixels (int): The amount of image pixels in the x dimension.
+      x_pixels: 512
+    # invocation (dict): Contains information for invoking the the model class.
+    invocation: 
+      # target (str): The full python package dot path for the desired model class.
+      target: professor.torch_models.Generator
+      # params (dict): This dictionary is passed directly to the object specified in `target` above.
+      #   NOTE: All required argument names much match and be included for this to work.
+      params:
+        # Various fields will be highly dependent on the type of target model.
+        input_size: ${model.pytorch.dimensions.n_inputs}
+        im_size: ${model.pytorch.dimensions.y_pixels}
+        num_channels: 1
+        max_features: 1024
+        min_features: 128
+        # If an argument is the result of a function call, specify with this styntax.
+        # `args` is optional and only required if the invocation requires an arugment.
+        # <arg_name>:
+        #   invocation:
+        #     target: dot.path.to.object
+        #     args: [OPTIONAL]
+        #       arg_name: 1
+        first_layer:
+          invocation:
+            target: torch.nn.Identity
+        last_layer: 
+          invocation:
+            target: professor.layers.AlphaLinear
+            params:
+              n_channels: 1
+        act_fun: "ReLU"
+        y_kernel: 2
+        x_kernel: 2
+    # execution (dict): Execution related values
+    execution:
+      # half_precision (bool): Whether the model should use half precision.
+      half_precision: True
+      # jit (bool): Whether JIT tracing should be used.
+      jit: True
+
+# gui (dict): Fields related to the GUI
+gui:
+  napari:
+    # fields (list[str]): Keys to display in the GUI and linked to the model.
+    fields:
+      - materials
+    # sliders (dict): The sliders used for user-interaction.
+    sliders:
+      # <slider name> (dict): Specify the fields for each slider desired.
+      # NOTE: <slider name> can be a unicode string as well, ie ρ₁ / ρ₂
+      a:
+        # lower_bound (float | int): Lower bound for the slider.
+        lower_bound: 0.1
+        # upper_bound (float | int): Upper bound for the slider.
+        upper_bound: 1.0
+        # initial_value (float | int | "mean"): Where the slider should start.
+        initial_value: mean
+      b:
+        lower_bound: 0.1
+        upper_bound: 1.0
+        initial_value: mean
+      n:
+        lower_bound: 1.0
+        upper_bound: 5.0
+        initial_value: mean
+      Time:
+        lower_bound: 0.0
+        upper_bound: 3.0
+        initial_value: 0.0
+    # appearance (dict) [OPTIONAL]: Generic GUI appearence settings.
+    appearance:
+      # colormap (str) [OPTIONAL]: Colormap string (any Matplotlib string works).
+      colormap: magma
+      # theme (str) [OPTIONAL]: Theme to use (light, dark, system).
+      theme: dark
+    # plugins (dict) [OPTIONAL]: Dict of configurations for plugins.
+    plugins:
+      # <plugin name> (dict): Each plugin will be it's own dictionary.
+      analytical:
+        # auto_load (bool): Whether the plugin should be loaded on startup.
+        auto_load: True
+        # target (str): Namespace to your own custom analytical plugin
+        target: analytical.example_tg_vortex_implementation.TaylorGreenVortexAnalytical
+        # <plugin_setting> (Any): Specify any values required by the plugin.
+        settings:
+          nearest_points: /usr/workspace/prof/models/tg-vortex-analytical/all_inputs.npy

@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://squidfunk.github.io/mkdocs-material/schema.json
+site_name: Professor Documentation
+repo_url: https://lc.llnl.gov/gitlab/jekel1/professor
+repo_name: jekel1/professor
+theme:
+  icon:
+    logo: material/rocket-launch
+  name: material
+  color_mode: light
+  palette: 
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: black
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    # Palette toggle for light mode
+    - scheme: default
+      primary: black
+      toggle:
+        icon: material/brightness-7 
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.instant
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.footer
+    - content.code.copy
+
+markdown_extensions:
+  - toc:
+      permalink: True
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  # - mdx_math:
+      # enable_dollar_delimiter: True #for use of inline $..$
+  # - fenced_code
+  # - codehilite
+  # - footnotes
+
+extra_javascript:
+  - assets/MathJax/es5/tex-mml-chtml.js
+
+nav:
+  - About professor:
+    - Home: index.md
+    - Basics: basics.md
+    - Tutorial:
+        - tutorial/index.md
+        - tutorial/data-generation.md
+        - tutorial/ml-training.md
+        - tutorial/ml-visualization.md
+    # - Basics: basics.md
+    # - Installation: installation.md 
+    # - Running: running.md
+    # - Configuration files: configs.md
+    # - Changelog:
+    #   - changelog/index.md
+    #   - Upgrade guide: changelog/upgrade.md

@@ -1,0 +1,68 @@
+model:
+  pytorch:
+    name: Taylor Green Vortex
+    checkpoints:
+      - /usr/workspace/prof/models/tg-vortex-analytical/taylor-green-0150.pt
+    devices:
+      - 0
+    seed: 1231
+    dimensions:
+      n_inputs: 4
+      batch_size: 1
+      y_pixels: 512
+      x_pixels: 512
+    invocation:
+      target: professor.torch_models.Generator
+      params:
+        input_size: ${model.pytorch.dimensions.n_inputs}
+        im_size: ${model.pytorch.dimensions.y_pixels}
+        num_channels: 1
+        max_features: 1024
+        min_features: 128
+        first_layer:
+          invocation:
+            target: torch.nn.Identity
+        last_layer:
+          invocation:
+            target: professor.layers.AlphaLinear
+            params:
+              n_channels: ${model.pytorch.invocation.params.num_channels}
+        act_fun: "ReLU"
+        y_kernel: 2
+        x_kernel: 2
+    execution:
+      half_precision: True
+      jit: True
+
+gui:
+  napari:
+    flip_y: False
+    reflect: False
+    fields:
+      - materials
+    sliders:
+      a:
+        lower_bound: 0.1
+        upper_bound: 1.0
+        initial_value: mean
+      b:
+        lower_bound: 0.1
+        upper_bound: 1.0
+        initial_value: mean
+      n:
+        lower_bound: 1.0
+        upper_bound: 5.0
+        initial_value: mean
+      Time:
+        lower_bound: 0.0
+        upper_bound: 3.0
+        initial_value: 0.0
+    appearance:
+      colormap: magma
+      theme: dark
+    plugins:
+      analytical:
+        auto_load: True
+        target: analytical.example_tg_vortex_implementation.TaylorGreenVortexAnalytical
+        settings:
+          nearest_points: /usr/workspace/prof/models/tg-vortex-analytical/all_inputs.npy
