@@ -1,0 +1,10 @@
+
+.dash-slider-mark {
+    color: black;
+}
+
+
+/* Dark mode overrides */
+html[data-bs-theme="dark"] .dash-slider-mark {
+    color: white;
+}
