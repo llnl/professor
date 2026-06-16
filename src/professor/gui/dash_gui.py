@@ -13,6 +13,9 @@ from typing import Any, Iterable
 
 
 class ProfessorHelper:
+    """
+    Helper class for launching and evaluating professor models
+    """
     def __init__(self) -> None:
         self._fields: list[str] = []
         self._sliders: dict[str, Any] = {}
@@ -20,6 +23,15 @@ class ProfessorHelper:
         self._model: torch.nn.modules.module.Module | None = None
 
     def load(self, config_fname: str) -> tuple[list[str], dict[str, Any]]:
+        """
+        Load a professor model from a yaml-format configuration file
+
+        Args:
+            config_name: Configuration filename
+
+        Returns:
+            List of model prediction fields, dictionary of slider inputs 
+        """
         from professor.vela import config, model
 
         print(f"Loading model: {config_fname}")
@@ -33,6 +45,15 @@ class ProfessorHelper:
         return self._fields, self._sliders
 
     def run(self, model_args: Iterable[float]) -> np.ndarray:
+        """
+        Evaluate the loaded professor model
+
+        Args:
+            model_args: list of model inputs
+
+        Returns:
+            np.ndarray of model results
+        """
         if self._model is None:
             return np.zeros(0)
 
@@ -68,6 +89,9 @@ class EntryConfig:
 
 
 def build_slider(config: SliderConfig) -> dbc.Row:
+    """
+    Build a row that contains a label and slider
+    """
     tooltip = {
         "placement": "bottom",
         # "always_visible": True
@@ -88,6 +112,9 @@ def build_slider(config: SliderConfig) -> dbc.Row:
 
 
 def build_dropdown(config: DropdownConfig) -> dbc.Row:
+    """
+    Build a row that contains a label and dropdown
+    """
     w = dbc.Select(id=f"dropdown_{config.name}", options=config.options, value=config.options[0])
 
     columns = [dbc.Col(html.P(config.name)), dbc.Col(w)]
@@ -95,6 +122,9 @@ def build_dropdown(config: DropdownConfig) -> dbc.Row:
 
 
 def build_entry(config: EntryConfig) -> dbc.Row:
+    """
+    Build a row that contains a label and entry box
+    """
     w = dbc.Input(id=f"entry_{config.name}", type="text", placeholder="(empty)", value=config.value)
 
     columns = [dbc.Col(html.P(config.name)), dbc.Col(w)]
@@ -102,6 +132,9 @@ def build_entry(config: EntryConfig) -> dbc.Row:
 
 
 def build_dummy_figure() -> go.Figure:
+    """
+    Build an empty placeholder figure
+    """
     dummy_figure = go.Figure()
     axis_def = {"showline": False, "zeroline": False, "showgrid": False, "range": (0, 1)}
 
@@ -119,6 +152,9 @@ def build_dummy_figure() -> go.Figure:
 
 
 def get_color_scale(img: np.ndarray, saturation: float) -> tuple[float, float]:
+    """
+    Get the desired color range for an input array and saturation
+    """
     cmin = np.amin(img)
     cmax = np.amax(img)
     if saturation > 1.01:
@@ -174,6 +210,9 @@ def get_style_kwargs(light_mode: bool = False):
 def dash_plot_2D(
     img: np.ndarray, label: str = "Title", colorscale: str = "Turbo", saturation: float = 1, light_mode: bool = True
 ) -> go.Figure:
+    """
+    Render a 2D plotly figure for a given input array
+    """
     cmin, cmax = get_color_scale(img, saturation)
     axis_color, marker_color, font_color, style_kwargs = get_style_kwargs(light_mode)
 
@@ -222,6 +261,9 @@ def dash_plot_2D(
 def dash_plot_2D_planes(
     img: np.ndarray, label: str = "Title", colorscale: str = "Turbo", saturation: float = 1, light_mode: bool = True
 ) -> go.Figure:
+    """
+    Render a series of 2D plotly figures that show slices through an array
+    """
     img = np.array(img)
     cmin, cmax = get_color_scale(img, saturation)
     axis_color, marker_color, font_color, style_kwargs = get_style_kwargs(light_mode)
@@ -308,6 +350,9 @@ def dash_plot_3D(
     saturation: float = 1,
     light_mode: bool = True,
 ) -> go.Figure:
+    """
+    Render a 3D plotly figure for a given input array
+    """
     img = np.array(img)
     cmin, cmax = get_color_scale(img, saturation)
     axis_color, marker_color, font_color, style_kwargs = get_style_kwargs(light_mode)
@@ -394,6 +439,9 @@ def dash_plot_3D(
 
 
 def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) -> dash.Dash:
+    """
+    Build the ploty dash application
+    """
     # Configure global app behavior
     app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME])
 
@@ -569,6 +617,9 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
 
 
 def main():
+    """
+    Parse user arguments, then build and launch the application
+    """
     parser = argparse.ArgumentParser(
         prog="prof-dash-gui",
         description="Professor dash visualization",
