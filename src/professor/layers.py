@@ -8,14 +8,16 @@ from typing import Optional, Any, cast
 
 
 class AlphaLinear(nn.Module):
-    def __init__(self, n_channels: int = 1) -> None:
+    def __init__(self, n_channels: int = 1, n_dims: int = 2) -> None:
         super(AlphaLinear, self).__init__()
+        tensor_size = [1, n_channels] + [1 for _ in range(n_dims)]
+        
         self.alpha: nn.Parameter = nn.Parameter(
-            torch.ones(1, n_channels, 1, 1),
+            torch.ones(*tensor_size),
             requires_grad=True,
         )
         self.beta: nn.Parameter = nn.Parameter(
-            torch.ones(1, n_channels, 1, 1),
+            torch.ones(*tensor_size),
             requires_grad=True,
         )
 

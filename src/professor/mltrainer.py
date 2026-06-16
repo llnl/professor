@@ -18,7 +18,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 import professor
 from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
-from professor.torch_models import Generator
+from professor.torch_models import Generator, Generator3D, Generator3DTriplane
 from professor.vela.config import build_template_config, update_config_checkpoint
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.data import Dataset, DataLoader
@@ -40,6 +40,8 @@ class CompleteDataset(Dataset[Any]):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
+
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -67,6 +69,8 @@ class CompleteDataset(Dataset[Any]):
         self.n_input = x.shape[0]
         self.pixels_y = y.shape[1]
         self.pixels_x = y.shape[2]
+        if len(y.shape) == 4:
+            self.pixels_z = y.shape[3]
 
 
 class CompleteDatasetDivideScaling(CompleteDataset):
@@ -75,6 +79,7 @@ class CompleteDatasetDivideScaling(CompleteDataset):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -107,6 +112,7 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -138,6 +144,8 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         self.n_input = x.shape[0]
         self.pixels_y = y.shape[1]
         self.pixels_x = y.shape[2]
+        if len(y.shape) == 4:
+            self.pixels_z = y.shape[3]
 
 
 class CompleteDatasetRandom(Dataset[Any]):
@@ -151,6 +159,7 @@ class CompleteDatasetRandom(Dataset[Any]):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -172,6 +181,8 @@ class CompleteDatasetRandom(Dataset[Any]):
         self.n_input = x.shape[0]
         self.pixels_y = y.shape[1]
         self.pixels_x = y.shape[2]
+        if len(y.shape) == 4:
+            self.pixels_z = y.shape[3]
 
 
 def main(args: argparse.Namespace) -> None:
@@ -354,6 +365,7 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError(f"Unrecognized dataset type: {args.dataset_type}")
     n_pixels_y = TrainDataset.pixels_y
     n_pixels_x = TrainDataset.pixels_x
+    n_pixels_z = TrainDataset.pixels_z
     n_input = TrainDataset.n_input
 
     if args.dataset_type == 0:
@@ -390,10 +402,24 @@ def main(args: argparse.Namespace) -> None:
     n_train = TrainDataset.__len__()
 
     n_pixels = max(n_pixels_y, n_pixels_x)
+    n_dims = 2
+    if n_pixels_z > 1:
+        n_dims = 3
+        n_pixels = max(n_pixels, n_pixels_z)
 
-    finalLayer = AlphaLinear(n_channels=n_channels)
+    finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
 
-    model = Generator(
+    # Select generator strategy
+    generator_class = Generator
+    if n_dims == 3:
+        if args.compression_3d == "none":
+            generator_class = Generator3D
+        elif args.compression_3d == "triplane":
+            generator_class = Generator3DTriplane
+        else:
+            raise Exception(f"Unrecognized 3D compression option: {args.compression_3d}")
+
+    model = generator_class(
         input_size=n_input,
         im_size=n_pixels,
         num_channels=n_models,
@@ -481,11 +507,14 @@ def main(args: argparse.Namespace) -> None:
             n_inputs=n_input,
             x_pixels=n_pixels_x,
             y_pixels=n_pixels_y,
+            z_pixels=n_pixels_z,
             min_features=args.min_feature,
             max_features=args.max_feature,
             x_kernel=args.x_kernel,
             y_kernel=args.y_kernel,
             input_parameters=model_params,
+            fields=keys,
+            compression=args.compression_3d
         )
 
     # try to free up gpu memory
@@ -645,7 +674,14 @@ def main(args: argparse.Namespace) -> None:
                     # print(output.shape)
                     if not isinstance(output, torch.Tensor):
                         raise Exception(f"Model returned an unexpected value: {type(output)}")
-                    val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x)
+
+                    if n_dims == 2:
+                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x)
+                    elif n_dims == 3:
+                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x, n_pixels_z)
+                    else:
+                        raise Exception(f"Invalid number of dimensions: {n_dims}")
+
                     # need to convert this to 0 - 1 output
                     val_flat = output.view(n_channels, -1)
                     d_min = val_flat.min(dim=1)[0]
@@ -656,14 +692,26 @@ def main(args: argparse.Namespace) -> None:
                         val_images[:, key_ind] /= d_max[key_ind] - d_min[key_ind]  # noqa E501
                     if (rank == 0) and (writer is not None):
                         for key_ind, key in enumerate(keys):
-                            writer.add_images(
-                                key,
-                                val_images[:, key_ind].view(
+                            img_view = []
+                            if n_dims == 2:
+                                img_view = val_images[:, key_ind].view(
                                     -1,
                                     1,
                                     n_pixels_y,
                                     n_pixels_x,
-                                ),
+                                )
+                            elif n_dims == 3:
+                                # For 3D records, save the mid-point of the z dim
+                                img_view = val_images[:, key_ind, :, :, n_pixels_z // 2].view(
+                                    -1,
+                                    1,
+                                    n_pixels_y,
+                                    n_pixels_x,
+                                )
+
+                            writer.add_images(
+                                key,
+                                img_view,
                                 epoch,
                             )
 

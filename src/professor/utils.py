@@ -32,6 +32,7 @@ def consolidated_loss(
     # Calculate difference only once
     diff = pred - target
     abs_diff = torch.abs(diff)
+    sum_axes = [ii for ii in range(len(pred.shape)) if ii != 1]
 
     if "l1" in loss_types:
         # L1 loss is mean of absolute differences
@@ -41,7 +42,7 @@ def consolidated_loss(
         # L1 loss is mean of absolute differences
         losses["sum-per-channel"] = torch.sum(
             abs_diff,
-            (0, 2, 3),
+            sum_axes,
         )
 
     if "l1-sum" in loss_types:
@@ -49,7 +50,7 @@ def consolidated_loss(
             # L1 loss is mean of absolute differences
             losses["sum-per-channel"] = torch.sum(
                 abs_diff,
-                (0, 2, 3),
+                sum_axes,
             )
         losses["l1-sum"] = torch.sum(losses["sum-per-channel"])
 

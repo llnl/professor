@@ -222,6 +222,9 @@ class Generator3D(nn.Module):
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
+        """
+        Generator that uses a dense 3D generator to estimate a 3D field.
+        """
         super(Generator3D, self).__init__()
         self.activation_functions: Dict[str, nn.Module] = {
             "ReLU": nn.ReLU(inplace=True),
@@ -301,6 +304,106 @@ class Generator3D(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return self.main(input)
+
+
+class Generator3DTriplane(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        intermediate_channels: int = 0,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        act_fun: str = "ReLU",
+        last_bias: bool = False,
+    ) -> None:
+        """
+        Generator that uses three 2D child generators and a
+        fully-connected reconstruction network to estimate a 3D field.
+        """
+        super(Generator3DTriplane, self).__init__()
+
+        if intermediate_channels == 0:
+            intermediate_channels = num_channels
+
+        # Note: we are forwarding all arguments to the child generators except for the last layer
+        self.generator_x: Generator = Generator(
+            input_size,
+            im_size,
+            intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            last_bias=last_bias,
+        )
+        self.generator_y: Generator = Generator(
+            input_size,
+            im_size,
+            intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            last_bias=last_bias,
+        )
+        self.generator_z: Generator = Generator(
+            input_size,
+            im_size,
+            intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            last_bias=last_bias,
+        )
+        self.reconstruction_layers = nn.Sequential(
+            nn.Linear(in_features=3*intermediate_channels, out_features=3*intermediate_channels, bias=True),
+            nn.ReLU(),
+            nn.Linear(in_features=3*intermediate_channels, out_features=3*intermediate_channels, bias=True),
+            nn.ReLU(),
+            nn.Linear(in_features=3*intermediate_channels, out_features=num_channels, bias=True),
+            nn.ReLU()
+        )
+        self.last_layer = last_layer
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # Evaluate the three generators to get tensors of size
+        # [B, C, Y, Z], [B, C, X, Y], and [B, C, X, Y]
+        x = self.generator_x(input)
+        y = self.generator_y(input)
+        z = self.generator_z(input)
+        
+        # Combine the tensors into a single tensor with shape [B, X, Y, Z, 3*C]        
+        G = torch.broadcast_tensors(
+            torch.swapaxes(x.unsqueeze(2), 1, -1),
+            torch.swapaxes(y.unsqueeze(3), 1, -1),
+            torch.swapaxes(z.unsqueeze(4), 1, -1)
+        )
+        Nb, Nx, Ny, Nz, Nc = G[0].shape
+        a = torch.reshape(torch.stack(G, dim=1), (Nb, Nx, Ny, Nz, 3*Nc))
+        
+        # Apply the reconstruction layers, then return the shape to [B, C, X, Y, Z]
+        b = self.reconstruction_layers(a)
+        c = torch.moveaxis(b, -1, 1)
+
+        # Apply the final layer and return
+        return self.last_layer(c)
 
 
 class GenSubPixelConv(nn.Module):

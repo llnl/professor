@@ -37,6 +37,7 @@ class Keys(Enum):
     BATCH_SIZE = "batch_size"
     Y_PIXELS = "y_pixels"
     X_PIXELS = "x_pixels"
+    Z_PIXELS = "z_pixels"
     INVOCATION = "invocation"
     TARGET = "target"
     PARAMS = "params"
@@ -154,6 +155,7 @@ class DimensionsSchema(VelaSchema):
                 Keys.BATCH_SIZE.value: int,
                 Keys.Y_PIXELS.value: int,
                 Keys.X_PIXELS.value: int,
+                Optional(Keys.Z_PIXELS.value, default=1): int,
             }
         )
 
@@ -193,7 +195,10 @@ class _InvocationSchema(Schema):
             data[Keys.PARAMS.value]["last_layer"] = {
                 Keys.INVOCATION.value: {
                     Keys.TARGET.value: "professor.layers.AlphaLinear",
-                    Keys.PARAMS.value: {"n_channels": data[Keys.PARAMS.value]["num_channels"]},
+                    Keys.PARAMS.value: {
+                        "n_channels": data[Keys.PARAMS.value]["num_channels"],
+                        "n_dims": 2
+                        },
                 }
             }
 
@@ -479,6 +484,9 @@ class Config:
         self.x_pixels: int = self.dimensions[Keys.X_PIXELS.value]
         logger.debug(f"{Keys.X_PIXELS.value}: {self.x_pixels}")
 
+        self.z_pixels: int = self.dimensions[Keys.Z_PIXELS.value]
+        logger.debug(f"{Keys.Z_PIXELS.value}: {self.z_pixels}")
+
         self.invocation: Dict[str, Any] = self.model[Keys.INVOCATION.value]
         logger.debug(f"{Keys.INVOCATION.value}: {self.invocation}")
 
@@ -639,10 +647,13 @@ def build_template_config(
     n_channels: int = 1,
     x_pixels: int = 512,
     y_pixels: int = 512,
+    z_pixels: int = 1,
     min_features: int = 128,
     max_features: int = 1024,
     x_kernel: int = 4,
     y_kernel: int = 4,
+    compression: str = 'triplane',
+    fields: list[str] = ['field'],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
 ) -> None:
     """
@@ -656,6 +667,16 @@ def build_template_config(
     dims["n_inputs"] = n_inputs
     dims["x_pixels"] = x_pixels
     dims["y_pixels"] = y_pixels
+    dims["z_pixels"] = z_pixels
+
+    if z_pixels > 1:
+        conf["model"]["pytorch"]["invocation"]["params"]["last_layer"]["invocation"]["params"]["n_dims"] = 3
+        if compression == 'none':
+            conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
+        elif compression == 'triplane':
+            conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
+        else:
+            raise Exception(f'Unrecognized 3D compression method: {compression}')
 
     params = conf["model"]["pytorch"]["invocation"]["params"]
     params["num_channels"] = n_channels
@@ -663,6 +684,8 @@ def build_template_config(
     params["max_features"] = max_features
     params["x_kernel"] = x_kernel
     params["y_kernel"] = y_kernel
+
+    conf["gui"]["napari"]["fields"] = fields
 
     sliders = conf["gui"]["napari"]["sliders"]
     for param_name, param_min, param_max in input_parameters:
