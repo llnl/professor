@@ -219,7 +219,7 @@ def dash_plot_2D(
     fig = go.Figure()
     fig.add_trace(
         go.Heatmap(
-            z=np.transpose(img),
+            z=img,
             colorscale=colorscale,
             name="image-layer",
             zsmooth="fast",
@@ -276,7 +276,7 @@ def dash_plot_2D_planes(
     fig = make_subplots(rows=2, cols=2, subplot_titles=("Xmid", "Ymid", "Zmid", ""))
     fig.add_trace(
         go.Heatmap(
-            z=np.transpose(img[ii, :, :]),
+            z=img[ii, :, :],
             colorscale=colorscale,
             name="image-layer",
             zsmooth="fast",
@@ -289,7 +289,7 @@ def dash_plot_2D_planes(
     )
     fig.add_trace(
         go.Heatmap(
-            z=np.transpose(img[:, jj, :]),
+            z=img[:, jj, :],
             colorscale=colorscale,
             name="image-layer",
             zsmooth="fast",
@@ -302,7 +302,7 @@ def dash_plot_2D_planes(
     )
     fig.add_trace(
         go.Heatmap(
-            z=np.transpose(img[:, :, kk]),
+            z=img[:, :, kk],
             colorscale=colorscale,
             name="image-layer",
             zsmooth="fast",
