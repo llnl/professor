@@ -7,7 +7,6 @@ import argparse
 
 
 def prof_trainer() -> None:
-
     parser = argparse.ArgumentParser(
         prog="prof-trainer",
         description=f"Train full-field machine learning models in regression!\n{professor._name}",
@@ -134,6 +133,21 @@ def prof_trainer() -> None:
     )
     parser.add_argument("--compile", action="store_true", help="Whether to use torch.compile to optimize the module.")
     parser.add_argument("--vis-config", type=str, default="", help="Build a template visualization config file.")
+
+    parser.add_argument(
+        "--pin_memory", action="store_true", help="Use pinned host memory for faster CPU-to-GPU transfers."
+    )
+    parser.add_argument(
+        "--persistent_workers", action="store_true", help="Keep DataLoader workers alive between epochs."
+    )
+    parser.add_argument("--prefetch_factor", type=int, default=1, help="Batches prefetched per DataLoader worker.")
+
+    parser.add_argument("--prof-metrics-jsonl", action="store_true", help="Write per-rank JSONL training metrics.")
+    parser.add_argument(
+        "--prof-metrics-sync-timing", action="store_true", help="Synchronize GPU timing for more accurate measurements."
+    )
+    parser.add_argument("--prof-metrics-flush-every", type=int, default=50, help="Flush metrics after every N records.")
+
     args = parser.parse_args()
 
     from professor.mltrainer import main

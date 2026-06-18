@@ -19,6 +19,7 @@ from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
 from professor.torch_models import Generator
 from professor.vela.config import build_template_config, update_config_checkpoint
+from professor.trainer_metrics import TrainerMetricsLogger
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -278,6 +279,18 @@ def main(args: argparse.Namespace) -> None:
             writer = None
             output_dir = None
 
+    # Broadcast the run directory so every rank can write per-rank metrics files.
+    output_dir = COMM.bcast(output_dir, root=0)
+
+    prof_metrics_logger = TrainerMetricsLogger(
+        output_dir=output_dir,
+        rank=rank,
+        world_size=size,
+        enabled=getattr(args, "prof_metrics_jsonl", False),
+        sync_timing=getattr(args, "prof_metrics_sync_timing", False),
+        flush_every=getattr(args, "prof_metrics_flush_every", 50),
+    )
+
     if len(restart_model) == 0:
         restart = False
     else:
@@ -433,18 +446,49 @@ def main(args: argparse.Namespace) -> None:
     print(f"found {n_train} training samples")
 
     train_sampler = DistributedSampler(TrainDataset, shuffle=True)
-    train_loader = DataLoader(
-        TrainDataset,
-        batch_size=batch_size,
-        sampler=train_sampler,
-        num_workers=args.dataloader_workers,
-        prefetch_factor=1,
-    )
+    train_loader_kwargs = {
+        "dataset": TrainDataset,
+        "batch_size": batch_size,
+        "sampler": train_sampler,
+        "num_workers": args.dataloader_workers,
+        "pin_memory": args.pin_memory,
+    }
+    if args.dataloader_workers > 0:
+        train_loader_kwargs["prefetch_factor"] = args.prefetch_factor
+        train_loader_kwargs["persistent_workers"] = args.persistent_workers
+
+    train_loader = DataLoader(**train_loader_kwargs)
 
     val_loader = torch.utils.data.DataLoader(
         ValDataset,
         batch_size=batch_size,
         shuffle=False,
+    )
+
+    prof_metrics_logger.log_run_config(
+        output_dir=output_dir,
+        professor_version=professor.__version__,
+        dataset_path=path,
+        dataset_file=args.dataset_file,
+        dataset_type=args.dataset_type,
+        n_sims=n_sims,
+        n_train=n_train,
+        n_train_loader=len(train_loader),
+        batch_size=batch_size,
+        global_batch_size=batch_size * size,
+        dataloader_workers=args.dataloader_workers,
+        prefetch_factor=args.prefetch_factor,
+        pin_memory=args.pin_memory,
+        persistent_workers=args.persistent_workers,
+        num_epochs=num_epochs,
+        start_epoch=epoch_number,
+        seed=seed_number,
+        n_channels=n_channels,
+        n_input=n_input,
+        n_pixels_y=n_pixels_y,
+        n_pixels_x=n_pixels_x,
+        ngpus_per_node=ngpus_per_node,
+        local_rank=local_rank,
     )
 
     optimizer = ZeroRedundancyOptimizer(
@@ -504,6 +548,9 @@ def main(args: argparse.Namespace) -> None:
             with record_function("epoch_setup"):
                 train_sampler.set_epoch(epoch)
                 t0 = time()
+                epoch_start = prof_metrics_logger.now()
+                wait_start = epoch_start
+                prof_metrics_logger.log_epoch_start(epoch=epoch)
                 train_loss = 0.0
                 test_loss = 0.0
                 train_mse = 0.0
@@ -513,9 +560,26 @@ def main(args: argparse.Namespace) -> None:
                 train_con = 0.0
                 test_con = 0.0
                 training_losses = torch.zeros(n_models)
+                local_samples = 0
+                first_batch_seen = False
+
             with record_function("epoch_iteration"):
                 for batch_idx, (data, target) in enumerate(train_loader):
+                    with record_function("dataloader_next"):
+                        dataloader_wait_s = prof_metrics_logger.elapsed(wait_start)
+
+                    if not first_batch_seen:
+                        prof_metrics_logger.log_first_batch(
+                            epoch=epoch,
+                            time_to_first_batch_s=prof_metrics_logger.elapsed(epoch_start),
+                        )
+                        first_batch_seen = True
+
+                    batch_size_actual = int(data.shape[0])
+                    local_samples += batch_size_actual
+
                     with record_function("optimizer_step"):
+                        step_start = prof_metrics_logger.now()
                         optimizer.zero_grad()
                         data = data.to(device)
                         target = target.to(device)
@@ -523,6 +587,7 @@ def main(args: argparse.Namespace) -> None:
                         loss = MyLoss(output, target)
                         loss.backward()
                         optimizer.step()
+                        step_time_s = prof_metrics_logger.elapsed(step_start)
                     with record_function("other_losses"):
                         with torch.no_grad():
                             losses = consolidated_loss(
@@ -536,10 +601,23 @@ def main(args: argparse.Namespace) -> None:
                                 losses["linf"].item(),
                                 train_l8,
                             )
+                    prof_metrics_logger.log_step(
+                        epoch=epoch,
+                        step=batch_idx,
+                        dataloader_wait_s=dataloader_wait_s,
+                        step_time_s=step_time_s,
+                        batch_size=batch_size_actual,
+                    )
                     if args.profile and (prof is not None):
                         prof.step()
-                    # end of a step in the epoch
+                    # Start timing the wait for the next DataLoader batch.
+                    wait_start = prof_metrics_logger.now()
                 t1 = time()
+                prof_metrics_logger.log_epoch_end(
+                    epoch=epoch,
+                    epoch_time_s=prof_metrics_logger.elapsed(epoch_start),
+                    local_samples=local_samples,
+                )
 
                 with record_function("communicate_losses_to_rank0"):
                     training_sums = np.array(
@@ -646,6 +724,8 @@ def main(args: argparse.Namespace) -> None:
                 prof.export_memory_timeline(f"{output_dir}/memory_prof-trainer_size_{size}.json.gz")
         if writer is not None:
             writer.close()
+
+    prof_metrics_logger.close()
 
     print(f"[Rank{rank}]: finished")
     COMM.Barrier()
