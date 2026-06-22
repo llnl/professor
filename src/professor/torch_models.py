@@ -384,7 +384,7 @@ class Generator3DTriplane(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # Evaluate the three generators to get tensors of size
-        # [B, C, Y, Z], [B, C, X, Y], and [B, C, X, Y]
+        # [B, C, Y, Z], [B, C, X, Z], and [B, C, X, Y]
         x = self.generator_x(input)
         y = self.generator_y(input)
         z = self.generator_z(input)
