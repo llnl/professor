@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 import h5py
 from scipy.stats import qmc
+from scipy.signal import medfilt
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 
@@ -49,6 +50,9 @@ def generate_sample(
     a = v * (4 * np.pi * diffusivity * t) ** -1.5
     b = rs / (4.0 * diffusivity * t)
     c = a * np.exp(-b)
+    c = medfilt(c, kernel_size=3)
+
+    print(sample, np.amin(c), np.amax(c))
 
     if render_image:
         plot_image(c)
@@ -83,7 +87,7 @@ def main():
     # Sample the target space
     sampler = qmc.LatinHypercube(d=6, seed=args.seed)
     sample = np.array(sampler.random(n=args.num_samples))
-    sample_keys = ['x', 'y', 'z', 't', 'v', 'diffusivity']
+    sample_keys = ['x', 'y', 'z', 'diffusivity']
     vals = {k: sample[:, ii] for ii, k in enumerate(sample_keys)}
 
     # Sync values
@@ -113,8 +117,8 @@ def main():
             vals['x'][ii],
             vals['y'][ii],
             vals['z'][ii],
-            vals['t'][ii],
-            vals['v'][ii],
+            1.0,
+            1.0,
             0.4 * vals['diffusivity'][ii] + 0.1,
             args.resolution,
             output_dir=args.output

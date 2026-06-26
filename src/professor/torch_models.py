@@ -312,7 +312,7 @@ class Generator3DTriplane(nn.Module):
         input_size: int,
         im_size: int,
         num_channels: int,
-        intermediate_channels: int = 0,
+        intermediate_channels: int = 3,
         min_features: int = 64,
         max_features: int = 512,
         first_layer: nn.Module = nn.Identity(),
@@ -372,39 +372,35 @@ class Generator3DTriplane(nn.Module):
             act_fun=act_fun,
             last_bias=last_bias,
         )
+
+        activation_function = self.generator_z.activation_functions[act_fun]
         self.reconstruction_layers = nn.Sequential(
-            nn.Linear(in_features=3*intermediate_channels, out_features=3*intermediate_channels, bias=True),
-            nn.ReLU(),
-            nn.Linear(in_features=3*intermediate_channels, out_features=3*intermediate_channels, bias=True),
-            nn.ReLU(),
-            nn.Linear(in_features=3*intermediate_channels, out_features=num_channels, bias=True),
-            nn.ReLU()
+            nn.Conv3d(in_channels=3*intermediate_channels, out_channels=3*intermediate_channels, kernel_size=1),
+            nn.BatchNorm3d(3*intermediate_channels),
+            activation_function,
+            nn.Conv3d(in_channels=3*intermediate_channels, out_channels=num_channels, kernel_size=1),
+            nn.BatchNorm3d(num_channels),
+            activation_function,
         )
         self.last_layer = last_layer
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # Evaluate the three generators to get tensors of size
         # [B, C, Y, Z], [B, C, X, Z], and [B, C, X, Y]
-        x = self.generator_x(input)
-        y = self.generator_y(input)
-        z = self.generator_z(input)
+        x = self.generator_x(input).unsqueeze(2)
+        y = self.generator_y(input).unsqueeze(3)
+        z = self.generator_z(input).unsqueeze(4)
+
+        # Broadcast tensors to common shape of [B, C, X, Y, Z]
+        Nb, Nc, _, Ny, Nz = x.shape
+        _, _, Nx, _, _ = y.shape
+        bx = torch.broadcast_to(x, (Nb, Nc, Nx, Ny, Nz))
+        by = torch.broadcast_to(y, (Nb, Nc, Nx, Ny, Nz))
+        bz = torch.broadcast_to(z, (Nb, Nc, Nx, Ny, Nz))
         
-        # Combine the tensors into a single tensor with shape [B, X, Y, Z, 3*C]        
-        G = torch.broadcast_tensors(
-            torch.swapaxes(x.unsqueeze(2), 1, -1),
-            torch.swapaxes(y.unsqueeze(3), 1, -1),
-            torch.swapaxes(z.unsqueeze(4), 1, -1)
-        )
-        Nb, Nx, Ny, Nz, Nc = G[0].shape
-        a = torch.reshape(torch.stack(G, dim=1), (Nb, Nx, Ny, Nz, 3*Nc))
-        
-        # Apply the reconstruction layers, then return the shape to [B, C, X, Y, Z]
+        a = torch.cat([bx, by, bz], dim=1) # shape: (Nb, 3*Nc, Nx, Ny, Nz)
         b = self.reconstruction_layers(a)
-        c = torch.moveaxis(b, -1, 1)
-
-        # Apply the final layer and return
-        return self.last_layer(c)
-
+        return self.last_layer(b)
 
 class GenSubPixelConv(nn.Module):
     def __init__(
