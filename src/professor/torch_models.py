@@ -402,6 +402,116 @@ class Generator3DTriplane(nn.Module):
         b = self.reconstruction_layers(a)
         return self.last_layer(b)
 
+
+class Generator3DSpectral(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        z_kernel: int = 4,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        act_fun: str = "ReLU",
+        last_bias: bool = False,
+    ) -> None:
+        """
+        Generator that uses a dense 3D generator to estimate a 3D field.
+        """
+        super(Generator3DSpectral, self).__init__()
+        self.activation_functions: Dict[str, nn.Module] = {
+            "ReLU": nn.ReLU(inplace=True),
+            "Tanh": nn.Tanh(),
+            "Softplus": nn.Softplus(),
+            "SoftSign": nn.Softsign(),
+            "Mish": nn.Mish(inplace=True),
+            "SiLU": nn.SiLU(inplace=True),
+            "GELU": nn.GELU(),
+            "CELU": nn.SELU(inplace=True),
+            "LeakyReLU": nn.LeakyReLU(inplace=True),
+            "ELU": nn.ELU(inplace=True),
+        }
+        from neuralop.layers.spectral_convolution import SpectralConv
+
+        activation_function = self.activation_functions[act_fun]
+        self.use_batch_norm: bool = use_batch_norm
+        self.first_layer: nn.Module = first_layer
+        self.last_layer: nn.Module = last_layer
+        # some possible last layers include
+        # nn.Tanh()
+        # nn.Identity()
+        # nn.ReLU(True)
+        # RB()
+        n_layers = np.log2(im_size) - 1
+        if np.floor(n_layers) != n_layers:
+            print("warning: output_size ({im_size}) is not a power of 2")
+        n_layers = int(np.floor(n_layers))
+        n_modes = (x_kernel, y_kernel, z_kernel)
+
+        l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
+        first_kernel = (z_kernel, y_kernel, x_kernel)
+        max_kernel = max(first_kernel)
+        
+        # Does it make sense to leave the first layer in the temporal domain due to its small size?
+        if self.use_batch_norm:
+            layer_1 = (
+                self.first_layer,
+                # SpectralConv(input_size, l1_out_features, n_modes, resolution_scaling_factor=1, bias=False),
+                nn.ConvTranspose3d(input_size, l1_out_features, first_kernel, 1, 0, bias=False),
+                nn.BatchNorm3d(l1_out_features),
+                activation_function,
+            )
+        else:
+            layer_1 = (
+                self.first_layer,
+                # SpectralConv(input_size, l1_out_features, n_modes, resolution_scaling_factor=1, bias=False),
+                nn.ConvTranspose3d(input_size, l1_out_features, first_kernel, 1, 0, bias=False),
+                activation_function,
+            )
+        target_image = im_size // 2
+        middle_layers = ()
+        out_features = min_features
+        while target_image > max_kernel:
+            target_image = target_image // 2
+            if out_features * 2 <= l1_out_features:
+                in_features = out_features * 2
+            else:
+                in_features = out_features
+            if self.use_batch_norm:
+                middle_layers = (
+                    SpectralConv(in_features, out_features, n_modes, resolution_scaling_factor=2, bias=False),
+                    nn.BatchNorm3d(out_features),
+                    activation_function,
+                ) + middle_layers
+            else:
+                middle_layers = (
+                    SpectralConv(in_features, out_features, n_modes, resolution_scaling_factor=2, bias=False),
+                    activation_function,
+                ) + middle_layers
+            out_features = in_features
+
+        layers = (
+            layer_1
+            + middle_layers
+            + (
+                SpectralConv(min_features, num_channels, n_modes, resolution_scaling_factor=2, bias=last_bias),
+                # Hardtanh and (None) also seem to work well
+                self.last_layer,
+            )
+        )
+
+        self.main: nn.Sequential = nn.Sequential(*layers)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x = torch.reshape(input, (input.shape[0], input.shape[1], 1, 1, 1))
+        return self.main(x)
+
+
 class GenSubPixelConv(nn.Module):
     def __init__(
         self,

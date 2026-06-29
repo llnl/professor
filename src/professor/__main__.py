@@ -108,10 +108,10 @@ def prof_trainer() -> None:
         help="Number of x pixels in the first representation of the model.",
     )
     parser.add_argument(
-        "--compression-3d",
+        "--option-3d",
         type=str,
         default="triplane",
-        help="3D data compression option (triplane, none)",
+        help="3D data representation option (triplane, spectral, voxel)",
     )
     parser.add_argument(
         "--dataloader_workers",

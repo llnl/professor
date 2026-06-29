@@ -18,7 +18,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 import professor
 from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
-from professor.torch_models import Generator, Generator3D, Generator3DTriplane
+from professor.torch_models import Generator, Generator3D, Generator3DTriplane, Generator3DSpectral
 from professor.vela.config import build_template_config, update_config_checkpoint
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.data import Dataset, DataLoader
@@ -412,12 +412,14 @@ def main(args: argparse.Namespace) -> None:
     # Select generator strategy
     generator_class = Generator
     if n_dims == 3:
-        if args.compression_3d == "none":
+        if args.option_3d == "voxel":
             generator_class = Generator3D
-        elif args.compression_3d == "triplane":
+        elif args.option_3d == "triplane":
             generator_class = Generator3DTriplane
+        elif args.option_3d == "spectral":
+            generator_class = Generator3DSpectral
         else:
-            raise Exception(f"Unrecognized 3D compression option: {args.compression_3d}")
+            raise Exception(f"Unrecognized 3D compression option: {args.option_3d}")
 
     model = generator_class(
         input_size=n_input,
@@ -436,6 +438,7 @@ def main(args: argparse.Namespace) -> None:
             model,
             input_size=(batch_size, n_input, 1, 1),
             depth=7,
+            device="cpu"
         )
         with open(f"{output_dir}/model.info", "wb") as f:
             f.write(str(model_stats).encode("utf-8"))
