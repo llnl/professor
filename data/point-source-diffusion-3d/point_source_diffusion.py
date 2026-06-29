@@ -52,12 +52,11 @@ def generate_sample(
     c = a * np.exp(-b)
     c = medfilt(c, kernel_size=3)
 
-    print(sample, np.amin(c), np.amax(c))
-
     if render_image:
         plot_image(c)
 
-    inputs = [x, y, z, t, v, diffusivity]
+    # inputs = [x, y, z, t, v, diffusivity]
+    inputs = [x, y, z, diffusivity]
     fname = os.path.join(output_dir, f"image_{sample:06d}.h5")
     with h5py.File(fname, mode="w") as allimages:
         allimages.create_dataset(
