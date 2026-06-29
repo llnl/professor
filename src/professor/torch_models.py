@@ -417,6 +417,7 @@ class Generator3DSpectral(nn.Module):
         z_kernel: int = 4,
         y_kernel: int = 4,
         x_kernel: int = 4,
+        n_modes: int = 8,
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
@@ -451,17 +452,14 @@ class Generator3DSpectral(nn.Module):
         if np.floor(n_layers) != n_layers:
             print("warning: output_size ({im_size}) is not a power of 2")
         n_layers = int(np.floor(n_layers))
-        n_modes = (x_kernel, y_kernel, z_kernel)
 
         l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
         first_kernel = (z_kernel, y_kernel, x_kernel)
         max_kernel = max(first_kernel)
         
-        # Does it make sense to leave the first layer in the temporal domain due to its small size?
         if self.use_batch_norm:
             layer_1 = (
                 self.first_layer,
-                # SpectralConv(input_size, l1_out_features, n_modes, resolution_scaling_factor=1, bias=False),
                 nn.ConvTranspose3d(input_size, l1_out_features, first_kernel, 1, 0, bias=False),
                 nn.BatchNorm3d(l1_out_features),
                 activation_function,
@@ -469,7 +467,6 @@ class Generator3DSpectral(nn.Module):
         else:
             layer_1 = (
                 self.first_layer,
-                # SpectralConv(input_size, l1_out_features, n_modes, resolution_scaling_factor=1, bias=False),
                 nn.ConvTranspose3d(input_size, l1_out_features, first_kernel, 1, 0, bias=False),
                 activation_function,
             )
@@ -482,15 +479,22 @@ class Generator3DSpectral(nn.Module):
                 in_features = out_features * 2
             else:
                 in_features = out_features
+
+            conv_layer = None
+            if target_image > 31:
+                conv_layer = SpectralConv(in_features, out_features, (n_modes, n_modes, n_modes), resolution_scaling_factor=2, bias=False)
+            else:
+                conv_layer = nn.ConvTranspose3d(in_features, out_features, 4, 2, 1, bias=False)
+
             if self.use_batch_norm:
                 middle_layers = (
-                    SpectralConv(in_features, out_features, n_modes, resolution_scaling_factor=2, bias=False),
+                    conv_layer,
                     nn.BatchNorm3d(out_features),
                     activation_function,
                 ) + middle_layers
             else:
                 middle_layers = (
-                    SpectralConv(in_features, out_features, n_modes, resolution_scaling_factor=2, bias=False),
+                    conv_layer,
                     activation_function,
                 ) + middle_layers
             out_features = in_features
@@ -499,7 +503,7 @@ class Generator3DSpectral(nn.Module):
             layer_1
             + middle_layers
             + (
-                SpectralConv(min_features, num_channels, n_modes, resolution_scaling_factor=2, bias=last_bias),
+                SpectralConv(min_features, num_channels, (n_modes, n_modes, n_modes), resolution_scaling_factor=2, bias=last_bias),
                 # Hardtanh and (None) also seem to work well
                 self.last_layer,
             )

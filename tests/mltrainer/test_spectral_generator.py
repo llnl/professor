@@ -15,7 +15,7 @@ def test_spectral_generator():
     final_layer = AlphaLinear(n_channels=num_channels, n_dims=3)
 
     gen = Generator3DSpectral(num_input,
-            128,
+            512,
             num_channels=num_channels,
             min_features=16,
             max_features=64,
