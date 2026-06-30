@@ -411,7 +411,9 @@ def main(args: argparse.Namespace) -> None:
 
     # Select generator strategy
     generator_class = Generator
+    generator_kwargs = {}
     if n_dims == 3:
+        generator_kwargs["z_kernel"] = args.z_kernel
         if args.option_3d == "voxel":
             generator_class = Generator3D
         elif args.option_3d == "triplane":
@@ -431,15 +433,11 @@ def main(args: argparse.Namespace) -> None:
         last_layer=finalLayer,
         y_kernel=args.y_kernel,
         x_kernel=args.x_kernel,
+        **generator_kwargs,
     )
 
     if rank == 0:
-        model_stats = summary(
-            model,
-            input_size=(batch_size, n_input, 1, 1),
-            depth=7,
-            device="cpu"
-        )
+        model_stats = summary(model, input_size=(batch_size, n_input, 1, 1), depth=7, device="cpu")
         with open(f"{output_dir}/model.info", "wb") as f:
             f.write(str(model_stats).encode("utf-8"))
 
@@ -517,7 +515,7 @@ def main(args: argparse.Namespace) -> None:
             y_kernel=args.y_kernel,
             input_parameters=model_params,
             fields=keys,
-            compression=args.compression_3d
+            compression=args.compression_3d,
         )
 
     # try to free up gpu memory

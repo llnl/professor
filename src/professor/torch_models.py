@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torchlayers.upsample import ConvPixelShuffle  # type: ignore[import-untyped]
-from typing import cast, Dict
+from typing import cast, Dict, Any
 
 
 class RB(nn.Module):
@@ -375,10 +375,10 @@ class Generator3DTriplane(nn.Module):
 
         activation_function = self.generator_z.activation_functions[act_fun]
         self.reconstruction_layers = nn.Sequential(
-            nn.Conv3d(in_channels=3*intermediate_channels, out_channels=3*intermediate_channels, kernel_size=1),
-            nn.BatchNorm3d(3*intermediate_channels),
+            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=3 * intermediate_channels, kernel_size=1),
+            nn.BatchNorm3d(3 * intermediate_channels),
             activation_function,
-            nn.Conv3d(in_channels=3*intermediate_channels, out_channels=num_channels, kernel_size=1),
+            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=num_channels, kernel_size=1),
             nn.BatchNorm3d(num_channels),
             activation_function,
         )
@@ -397,10 +397,34 @@ class Generator3DTriplane(nn.Module):
         bx = torch.broadcast_to(x, (Nb, Nc, Nx, Ny, Nz))
         by = torch.broadcast_to(y, (Nb, Nc, Nx, Ny, Nz))
         bz = torch.broadcast_to(z, (Nb, Nc, Nx, Ny, Nz))
-        
-        a = torch.cat([bx, by, bz], dim=1) # shape: (Nb, 3*Nc, Nx, Ny, Nz)
+
+        a = torch.cat([bx, by, bz], dim=1)  # shape: (Nb, 3*Nc, Nx, Ny, Nz)
         b = self.reconstruction_layers(a)
         return self.last_layer(b)
+
+
+def _build_middle_layer_schedule(
+    im_size: int, input_size: list[int], input_features: int, min_features: int
+) -> tuple[list[int], list[int], list[int]]:
+    layer_input_features: list[int] = []
+    layer_output_features: list[int] = []
+    layer_min_axis: list[int] = []
+    target_image = im_size // 2
+    layer_size = list(input_size)
+
+    while min(layer_size) < target_image:
+        layer_input_features.append(input_features)
+        input_features = max(min_features, input_features // 2)
+        layer_output_features.append(input_features)
+        layer_size = [2 * x for x in layer_size]
+        layer_min_axis.append(min(layer_size))
+
+    if len(layer_output_features):
+        layer_output_features[-1] = min_features
+    else:
+        print("Model configuration requires no middle layers")
+
+    return layer_input_features, layer_output_features, layer_min_axis
 
 
 class Generator3DSpectral(nn.Module):
@@ -424,6 +448,8 @@ class Generator3DSpectral(nn.Module):
         """
         Generator that uses a dense 3D generator to estimate a 3D field.
         """
+        from neuralop.layers.spectral_convolution import SpectralConv
+
         super(Generator3DSpectral, self).__init__()
         self.activation_functions: Dict[str, nn.Module] = {
             "ReLU": nn.ReLU(inplace=True),
@@ -437,82 +463,66 @@ class Generator3DSpectral(nn.Module):
             "LeakyReLU": nn.LeakyReLU(inplace=True),
             "ELU": nn.ELU(inplace=True),
         }
-        from neuralop.layers.spectral_convolution import SpectralConv
 
         activation_function = self.activation_functions[act_fun]
         self.use_batch_norm: bool = use_batch_norm
         self.first_layer: nn.Module = first_layer
         self.last_layer: nn.Module = last_layer
-        # some possible last layers include
-        # nn.Tanh()
-        # nn.Identity()
-        # nn.ReLU(True)
-        # RB()
+
         n_layers = np.log2(im_size) - 1
         if np.floor(n_layers) != n_layers:
             print("warning: output_size ({im_size}) is not a power of 2")
         n_layers = int(np.floor(n_layers))
 
-        l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
-        first_kernel = (z_kernel, y_kernel, x_kernel)
-        max_kernel = max(first_kernel)
-        
-        if self.use_batch_norm:
-            layer_1 = (
-                self.first_layer,
-                nn.ConvTranspose3d(input_size, l1_out_features, first_kernel, 1, 0, bias=False),
-                nn.BatchNorm3d(l1_out_features),
-                activation_function,
-            )
-        else:
-            layer_1 = (
-                self.first_layer,
-                nn.ConvTranspose3d(input_size, l1_out_features, first_kernel, 1, 0, bias=False),
-                activation_function,
-            )
-        target_image = im_size // 2
-        middle_layers = ()
-        out_features = min_features
-        while target_image > max_kernel:
-            target_image = target_image // 2
-            if out_features * 2 <= l1_out_features:
-                in_features = out_features * 2
-            else:
-                in_features = out_features
+        out_features = np.minimum(min_features * 2**n_layers, max_features)
+        layer_size = (x_kernel, y_kernel, z_kernel)
 
-            conv_layer = None
-            if target_image > 31:
-                conv_layer = SpectralConv(in_features, out_features, (n_modes, n_modes, n_modes), resolution_scaling_factor=2, bias=False)
+        # Build the first layers
+        layers: list[nn.Module] = [
+            self.first_layer,
+            nn.ConvTranspose3d(input_size, out_features, layer_size, 1, 0, bias=False),
+        ]
+        if self.use_batch_norm:
+            layers.append(nn.BatchNorm3d(out_features))
+
+        layers.append(activation_function)
+
+        # Build the middle layers
+        layer_input_features, layer_output_features, layer_min_axis = _build_middle_layer_schedule(
+            im_size, layer_size, out_features, min_features
+        )
+        for in_features, out_features, min_axis in zip(layer_input_features, layer_output_features, layer_min_axis):
+            if min_axis >= 32:
+                layers.append(
+                    SpectralConv(
+                        in_features, out_features, (n_modes, n_modes, n_modes), resolution_scaling_factor=2, bias=False
+                    )
+                )
             else:
-                conv_layer = nn.ConvTranspose3d(in_features, out_features, 4, 2, 1, bias=False)
+                layers.append(nn.ConvTranspose3d(in_features, out_features, 4, 2, 1, bias=False))
 
             if self.use_batch_norm:
-                middle_layers = (
-                    conv_layer,
-                    nn.BatchNorm3d(out_features),
-                    activation_function,
-                ) + middle_layers
-            else:
-                middle_layers = (
-                    conv_layer,
-                    activation_function,
-                ) + middle_layers
-            out_features = in_features
+                layers.append(nn.BatchNorm3d(out_features))
 
-        layers = (
-            layer_1
-            + middle_layers
-            + (
-                SpectralConv(min_features, num_channels, (n_modes, n_modes, n_modes), resolution_scaling_factor=2, bias=last_bias),
-                # Hardtanh and (None) also seem to work well
-                self.last_layer,
+            layers.append(activation_function)
+
+        # Build the final layers
+        layers.append(
+            SpectralConv(
+                min_features, num_channels, (n_modes, n_modes, n_modes), resolution_scaling_factor=2, bias=last_bias
             )
         )
+        layers.append(self.last_layer)
 
         self.main: nn.Sequential = nn.Sequential(*layers)
+        # self.main = layers
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         x = torch.reshape(input, (input.shape[0], input.shape[1], 1, 1, 1))
+        # for ii, layer in enumerate(self.main):
+        #     print(ii, layer, x.shape)
+        #     x = layer(x)
+        # return x
         return self.main(x)
 
 

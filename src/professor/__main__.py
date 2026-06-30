@@ -96,16 +96,22 @@ def prof_trainer() -> None:
         help="The plaintext filelist of all of the hdf5 files. This should be located in the `datset_path`.",
     )
     parser.add_argument(
+        "--x_kernel",
+        type=int,
+        default=1,
+        help="Number of x pixels in the first representation of the model.",
+    )
+    parser.add_argument(
         "--y_kernel",
         type=int,
         default=3,
         help="Number of y pixels in the first representation of the model.",
     )
     parser.add_argument(
-        "--x_kernel",
+        "--z_kernel",
         type=int,
         default=1,
-        help="Number of x pixels in the first representation of the model.",
+        help="Number of z pixels in the first representation of the model.",
     )
     parser.add_argument(
         "--option-3d",
