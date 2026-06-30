@@ -1,4 +1,5 @@
 import argparse
+import base64
 import os
 import h5py
 import torch
@@ -10,15 +11,16 @@ from dash import Input, Output, State, dcc, html, clientside_callback  # type: i
 from plotly.subplots import make_subplots  # type: ignore
 import plotly.graph_objs as go  # type: ignore
 from typing import Any, Iterable
+from professor.vela import config, model
 
 
 class ProfessorHelper:
     """
     Helper class for launching and evaluating professor models
     """
+
     def __init__(self) -> None:
-        self._fields: list[str] = []
-        self._sliders: dict[str, Any] = {}
+        self._config: config.Config | None = None
         self._device: torch.Device = ""
         self._model: torch.nn.modules.module.Module | None = None
 
@@ -30,19 +32,12 @@ class ProfessorHelper:
             config_name: Configuration filename
 
         Returns:
-            List of model prediction fields, dictionary of slider inputs 
+            List of model prediction fields, dictionary of slider inputs
         """
-        from professor.vela import config, model
-
-        print(f"Loading model: {config_fname}")
-        c = config.Config(os.path.expanduser(config_fname))
-        self._fields = c.fields
-        self._sliders = c.sliders
-        m = model.PyTorchModel(c)
-        self._device = m._get_checkpoint_device("0")
-        self._model = m.models[0].ref
+        print(f"Loading config: {config_fname}")
+        self._config = config.Config(os.path.expanduser(config_fname))
         print("Done!")
-        return self._fields, self._sliders
+        return self._config.fields, self._config.sliders
 
     def run(self, model_args: Iterable[float]) -> np.ndarray:
         """
@@ -54,13 +49,21 @@ class ProfessorHelper:
         Returns:
             np.ndarray of model results
         """
-        if self._model is None:
+        if self._config is None:
+            print("No model is loaded")
             return np.zeros(0)
+
+        if self._model is None:
+            print("Loading model (this may take up to a few minutes)...")
+            m = model.PyTorchModel(self._config)
+            self._device = m._get_checkpoint_device("0")
+            self._model = m.models[0].ref
+            print("Done!")
 
         with torch.no_grad():
             tmp = np.array(model_args)
             x = torch.Tensor(np.reshape(tmp, (1, -1, 1, 1))).half().to(self._device)
-            y = self._model(x).detach().to("cpu").numpy()
+            y = self._model(x).detach().to("cpu").numpy().astype(np.float32)
             return y
 
 
@@ -73,7 +76,7 @@ class SliderConfig:
     default: float = 0.0
     min: float = 0.0
     max: float = 1.0
-    step: float = 0.01
+    step: float = 0.001
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,22 @@ class DropdownConfig:
 class EntryConfig:
     name: str
     value: str
+
+
+def encode_array(x: np.ndarray) -> str:
+    """
+    Encode an NDarray as a string
+    """
+    return base64.b64encode(x.astype(np.float32, copy=False).tobytes()).decode("utf-8")
+
+
+def decode_array(x_str: str, N: list[int]) -> np.ndarray:
+    """
+    Decode an NDarray from a string
+    """
+    img_bytes = base64.b64decode(x_str.encode("utf-8"))  # type: ignore
+    flat_arr = np.frombuffer(img_bytes, dtype=np.float32)
+    return flat_arr.reshape(N)
 
 
 def build_slider(config: SliderConfig) -> dbc.Row:
@@ -137,6 +156,17 @@ def build_dummy_figure() -> go.Figure:
     """
     dummy_figure = go.Figure()
     axis_def = {"showline": False, "zeroline": False, "showgrid": False, "range": (0, 1)}
+
+    dummy_figure.add_annotation(
+        text="Loading model (this may take up to a few minutes)...",
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=24, color="red"),
+        align="center",
+    )
 
     dummy_figure.update_layout(
         clickmode="none",
@@ -486,7 +516,6 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
         build_slider(SliderConfig(name="Saturation", default=1, min=1, max=10)),
     ]
     config_inputs = [
-        Input("dropdown_Field", "value"),
         Input("dropdown_Colorscale", "value"),
         Input("dropdown_Rendering", "value"),
         Input("slider_Saturation", "value"),
@@ -537,39 +566,53 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
     )
 
     # Build the app layout
-    data_store = dcc.Store(id="model-results", storage_type="local", data={})
+    data_store = dcc.Store(id="model-results", storage_type="server", data={})
+    plot_data = dcc.Store(id="plot-data", storage_type="local", data={})
     download_file = dcc.Download(id="download-file")
     win_content = dbc.Row([dbc.Col(sidebar, width=4), dbc.Col(figure_graph, width=8)], justify="center")
     win = dbc.Container(win_content, fluid=True)
-    app.layout = html.Div(id="interface-container", children=[data_store, download_file, navbar, win])
+    app.layout = html.Div(id="interface-container", children=[data_store, plot_data, download_file, navbar, win])
 
     # Build app callbacks
     @app.callback(Output("model-results", "data"), slider_inputs)
     def update_model(*inputs: float):
         tmp = prof_model.run(inputs)
-        res = {}
+        if tmp.size == 1:
+            return {}
+
+        res: dict[str, Any] = {"shape": np.shape(tmp)[2:]}
         for ii, k in enumerate(fields):
-            res[k] = np.squeeze(tmp[0, ii, ...])
+            res[k] = encode_array(tmp[0, ii, ...])
         return res
+
+    # Note: this callback is used to limit the data transfer from the cached results
+    # on the server to the client side cache
+    @app.callback(Output("plot-data", "data"), Input("model-results", "data"), Input("dropdown_Field", "value"))
+    def update_plot_data(model_results: dict[str, Any], field: str) -> dict[str, Any]:
+        if field in model_results:
+            return {field: model_results[field], "shape": model_results["shape"], "field": field}
+        else:
+            return {}
 
     @app.callback(
         Output("figure-graph", "figure"),
-        Input("model-results", "data"),
+        Input("plot-data", "data"),
         Input("light-mode-switch", "value"),
         config_inputs,
     )
     def render_figure(
-        data: dict[str, np.ndarray],
+        data: dict[str, Any],
         light_mode: bool,
-        field: str,
         colorscale: str,
         rendering_style: str,
         saturation: float,
     ) -> go.Figure:
-        img = data.get(field)
-        if img is None:
-            return dash.no_update
+        if not len(data):
+            return dash.no_updte
 
+        # Rebuild the image from raw numpy bytes object from the local data store
+        field = data["field"]
+        img = decode_array(data[field], data["shape"])  # type: ignore
         if len(np.shape(img)) == 2:
             return dash_plot_2D(img, label=field, colorscale=colorscale, saturation=saturation, light_mode=light_mode)
         elif rendering_style == "2D":
@@ -595,11 +638,13 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
     def download_data(nclicks: int, data: dict[str, np.ndarray]):
         with h5py.File("model_data.h5", "w") as f:
             for k, v in data.items():
-                f.create_dataset(
-                    k,
-                    data=np.array(v).astype(np.float32),
-                    dtype=np.float32,
-                )
+                if k != "shape":
+                    img = decode_array(v, data["shape"])  # type: ignore
+                    f.create_dataset(
+                        k,
+                        data=img,
+                        dtype=np.float32,
+                    )
         return dcc.send_file("model_data.h5")
 
     clientside_callback(
@@ -637,7 +682,10 @@ def main():
     fields, slider_config = prof_model.load(args.config)
     sliders = []
     for k, s in slider_config.items():
-        sliders.append(SliderConfig(name=k, default=s["initial_value"], min=s["lower_bound"], max=s["upper_bound"]))
+        ds = 1e-3 * (s["upper_bound"] - s["lower_bound"])
+        sliders.append(
+            SliderConfig(name=k, default=s["initial_value"], min=s["lower_bound"], max=s["upper_bound"], step=ds)
+        )
 
     app = build_application(fields, sliders)
     app.run(port=args.port, debug=False)

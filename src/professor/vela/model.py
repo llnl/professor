@@ -15,7 +15,10 @@ from professor.vela.utils import (
     initialize_function_calls_in_parameters,
 )
 from abc import ABC, abstractmethod
-from napari.layers import Image
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from napari.layers import Image
 
 logger: logging.Logger = logging.getLogger(__name__)
 
