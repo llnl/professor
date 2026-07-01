@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torchlayers.upsample import ConvPixelShuffle  # type: ignore[import-untyped]
-from typing import cast, Dict, Any
+from typing import cast, Dict, Iterable
 
 
 class RB(nn.Module):
@@ -404,7 +404,7 @@ class Generator3DTriplane(nn.Module):
 
 
 def _build_middle_layer_schedule(
-    im_size: int, input_size: list[int], input_features: int, min_features: int
+    im_size: int, input_size: Iterable[int], input_features: int, min_features: int
 ) -> tuple[list[int], list[int], list[int]]:
     layer_input_features: list[int] = []
     layer_output_features: list[int] = []
@@ -448,7 +448,7 @@ class Generator3DSpectral(nn.Module):
         """
         Generator that uses a dense 3D generator to estimate a 3D field.
         """
-        from neuralop.layers.spectral_convolution import SpectralConv
+        from neuralop.layers.spectral_convolution import SpectralConv # type: ignore
 
         super(Generator3DSpectral, self).__init__()
         self.activation_functions: Dict[str, nn.Module] = {
