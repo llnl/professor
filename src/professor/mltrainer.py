@@ -10,8 +10,13 @@ import contextlib
 import numpy as np
 from numpy.typing import NDArray
 import h5py
-from mpi4py import MPI  # MUST BE IMPORTED BEFORE torch!
 import torch
+# On this ROCm + OpenMPI stack, the HIP runtime cannot initialize *after*
+# MPI_Init (which mpi4py triggers on import) -- torch.cuda then reports no
+# GPUs. Force the GPU context to initialize before importing mpi4py.
+if torch.cuda.is_available():
+    torch.cuda.init()
+from mpi4py import MPI  # noqa: E402
 import torch.nn as nn
 from torch.profiler import profile, record_function, ProfilerActivity
 import professor
@@ -191,7 +196,7 @@ def main(args: argparse.Namespace) -> None:
     print(f"[rank{rank}]: done hostname")
 
     os.environ["MASTER_ADDR"] = hostname
-    os.environ["MASTER_PORT"] = "23456"
+    os.environ.setdefault("MASTER_PORT", "23456")
 
     # wait a bit to make sure all nodes are running....
     sleep(3)
@@ -228,6 +233,16 @@ def main(args: argparse.Namespace) -> None:
         print(f"[rank{rank}]: Torch cuda device {torch.cuda.current_device()}")
     else:
         raise RuntimeError("No GPUs found!")
+
+    # --- experimental performance toggles (env-gated, default off) ---
+    _prof_bench = os.environ.get("PROF_CUDNN_BENCHMARK", "0") == "1"
+    _prof_chlast = os.environ.get("PROF_CHANNELS_LAST", "0") == "1"
+    _prof_amp = os.environ.get("PROF_AMP", "").lower()  # "", "bf16", or "fp16"
+    if _prof_bench:
+        torch.backends.cudnn.benchmark = True
+    _amp_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16}.get(_prof_amp)
+    if rank == 0:
+        print(f"[perf] cudnn.benchmark={_prof_bench} channels_last={_prof_chlast} amp={_prof_amp or 'off'}")
 
     batch_size = args.batch_size
     lr = args.lr
@@ -413,6 +428,8 @@ def main(args: argparse.Namespace) -> None:
 
     # broadcast parameters & optimizer state from root rank
     model.to(device)  # move to GPU
+    if _prof_chlast:
+        model = model.to(memory_format=torch.channels_last)
 
     if restart:
         # remap storage from GPU 0 to local GPU
@@ -439,6 +456,7 @@ def main(args: argparse.Namespace) -> None:
         sampler=train_sampler,
         num_workers=args.dataloader_workers,
         prefetch_factor=1,
+        drop_last=os.environ.get("PROF_DROP_LAST", "0") == "1",
     )
 
     val_loader = torch.utils.data.DataLoader(
@@ -447,11 +465,14 @@ def main(args: argparse.Namespace) -> None:
         shuffle=False,
     )
 
-    optimizer = ZeroRedundancyOptimizer(
-        model.parameters(),
-        optimizer_class=torch.optim.Adam,
-        lr=lr,
-    )
+    if os.environ.get("PROF_PLAIN_ADAM", "0") == "1":
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    else:
+        optimizer = ZeroRedundancyOptimizer(
+            model.parameters(),
+            optimizer_class=torch.optim.Adam,
+            lr=lr,
+        )
     if restart:
         # load optimizer state
         optimizer.load_state_dict(torch.load(restart_model)["optimizer"])
@@ -504,23 +525,35 @@ def main(args: argparse.Namespace) -> None:
             with record_function("epoch_setup"):
                 train_sampler.set_epoch(epoch)
                 t0 = time()
-                train_loss = 0.0
                 test_loss = 0.0
-                train_mse = 0.0
                 test_mse = 0.0
-                train_l8 = 0.0
                 test_l8 = 0.0
                 train_con = 0.0
                 test_con = 0.0
-                training_losses = torch.zeros(n_models)
+                # Training metrics are accumulated on-GPU during the epoch and
+                # copied to the host exactly once (after the step loop). This
+                # avoids a device->host sync on every step, which otherwise
+                # stalls the pipeline. Values are identical to the per-step sum.
+                train_loss_gpu = torch.zeros((), device=device)
+                train_mse_gpu = torch.zeros((), device=device)
+                train_l8_gpu = torch.zeros((), device=device)
+                training_losses_gpu = torch.zeros(n_models, device=device)
             with record_function("epoch_iteration"):
                 for batch_idx, (data, target) in enumerate(train_loader):
                     with record_function("optimizer_step"):
                         optimizer.zero_grad()
                         data = data.to(device)
                         target = target.to(device)
-                        output = model(data)
-                        loss = MyLoss(output, target)
+                        if _prof_chlast:
+                            data = data.to(memory_format=torch.channels_last)
+                            target = target.to(memory_format=torch.channels_last)
+                        if _amp_dtype is not None:
+                            with torch.autocast("cuda", dtype=_amp_dtype):
+                                output = model(data)
+                                loss = MyLoss(output, target)
+                        else:
+                            output = model(data)
+                            loss = MyLoss(output, target)
                         loss.backward()
                         optimizer.step()
                     with record_function("other_losses"):
@@ -529,17 +562,21 @@ def main(args: argparse.Namespace) -> None:
                                 output, target, loss_types=["l1-sum", "l2-sum", "linf", "sum-per-channel"]
                             )
                             assert isinstance(losses, dict)
-                            training_losses += losses["sum-per-channel"].cpu()
-                            train_loss += losses["l1-sum"].item()
-                            train_mse += losses["l2-sum"].item()
-                            train_l8 = max(
-                                losses["linf"].item(),
-                                train_l8,
-                            )
+                            # accumulate on-device; no host sync inside the loop
+                            training_losses_gpu += losses["sum-per-channel"]
+                            train_loss_gpu += losses["l1-sum"]
+                            train_mse_gpu += losses["l2-sum"]
+                            train_l8_gpu = torch.maximum(train_l8_gpu, losses["linf"])
                     if args.profile and (prof is not None):
                         prof.step()
                     # end of a step in the epoch
                 t1 = time()
+
+                # single device->host sync per epoch for the accumulated metrics
+                train_loss = train_loss_gpu.item()
+                train_mse = train_mse_gpu.item()
+                train_l8 = train_l8_gpu.item()
+                training_losses = training_losses_gpu.cpu()
 
                 with record_function("communicate_losses_to_rank0"):
                     training_sums = np.array(
@@ -592,7 +629,8 @@ def main(args: argparse.Namespace) -> None:
                                 writer.add_scalar(key, history[key], epoch)
 
                 if epoch % n_checkpoint == 0 or epoch == num_epochs - 1:
-                    optimizer.consolidate_state_dict()
+                    if hasattr(optimizer, "consolidate_state_dict"):
+                        optimizer.consolidate_state_dict()
                     if rank == 0:
                         filepath = f"{output_dir}/{epoch:04d}.pt"
                         state = {"optimizer": optimizer.state_dict()}
