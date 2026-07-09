@@ -58,6 +58,8 @@ nav:
         - tutorial/data-generation.md
         - tutorial/ml-training.md
         - tutorial/ml-visualization.md
+  - Performance:
+    - MI355X partition modes: mi355x_partition_modes.md
     # - Basics: basics.md
     # - Installation: installation.md 
     # - Running: running.md
