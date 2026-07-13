@@ -114,10 +114,16 @@ def prof_trainer() -> None:
         help="Number of z pixels in the first representation of the model.",
     )
     parser.add_argument(
-        "--option-3d",
+        "--upscale-type",
         type=str,
-        default="triplane",
-        help="3D data representation option (triplane, spectral, voxel)",
+        default="transpose",
+        help="Data upscaling method (transpose, nearest, bilinear, bicubic)",
+    )
+    parser.add_argument(
+        "--generator-type",
+        type=str,
+        default="legacy",
+        help="Generator type (legacy, 2D, 3D-triplane, 3D-spectral, 3D-voxel)",
     )
     parser.add_argument(
         "--dataloader_workers",

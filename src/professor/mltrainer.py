@@ -18,7 +18,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 import professor
 from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
-from professor.torch_models import Generator, Generator3D, Generator3DTriplane, Generator3DSpectral
+from professor.torch_models import build_generator
 from professor.vela.config import build_template_config, update_config_checkpoint
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.data import Dataset, DataLoader
@@ -410,20 +410,8 @@ def main(args: argparse.Namespace) -> None:
     finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
 
     # Select generator strategy
-    generator_class = Generator
-    generator_kwargs = {}
-    if n_dims == 3:
-        generator_kwargs["z_kernel"] = args.z_kernel
-        if args.option_3d == "voxel":
-            generator_class = Generator3D
-        elif args.option_3d == "triplane":
-            generator_class = Generator3DTriplane
-        elif args.option_3d == "spectral":
-            generator_class = Generator3DSpectral
-        else:
-            raise Exception(f"Unrecognized 3D representation option: {args.option_3d}")
-
-    model = generator_class(
+    model = build_generator(
+        args.generator_type,
         input_size=n_input,
         im_size=n_pixels,
         num_channels=n_models,
@@ -431,9 +419,9 @@ def main(args: argparse.Namespace) -> None:
         min_features=args.min_feature,
         first_layer=nn.Identity(),
         last_layer=finalLayer,
-        y_kernel=args.y_kernel,
         x_kernel=args.x_kernel,
-        **generator_kwargs,
+        y_kernel=args.y_kernel,
+        z_kernel=args.z_kernel,
     )
 
     if rank == 0:
@@ -530,7 +518,7 @@ def main(args: argparse.Namespace) -> None:
             z_kernel=args.z_kernel,
             input_parameters=model_params,
             fields=keys,
-            option_3d=args.option_3d,
+            generator_type=args.generator_type,
         )
 
     # try to free up gpu memory
@@ -674,7 +662,7 @@ def main(args: argparse.Namespace) -> None:
                         filepath = f"{output_dir}/{epoch:04d}q"
                         state = {"optimizer": optimizer.state_dict()}
                         if optimizer_complex is not None:
-                            state['optimizer_complex'] = optimizer_complex.state_dict()
+                            state["optimizer_complex"] = optimizer_complex.state_dict()
 
                         state["model"] = model.module.state_dict()
                         torch.save(state, filepath)

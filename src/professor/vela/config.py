@@ -195,10 +195,7 @@ class _InvocationSchema(Schema):
             data[Keys.PARAMS.value]["last_layer"] = {
                 Keys.INVOCATION.value: {
                     Keys.TARGET.value: "professor.layers.AlphaLinear",
-                    Keys.PARAMS.value: {
-                        "n_channels": data[Keys.PARAMS.value]["num_channels"],
-                        "n_dims": 2
-                        },
+                    Keys.PARAMS.value: {"n_channels": data[Keys.PARAMS.value]["num_channels"], "n_dims": 2},
                 }
             }
 
@@ -653,8 +650,8 @@ def build_template_config(
     x_kernel: int = 4,
     y_kernel: int = 4,
     z_kernel: int = 0,
-    option_3d: str = 'triplane',
-    fields: list[str] = ['field'],
+    generator_type: str = "legacy",
+    fields: list[str] = ["field"],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
 ) -> None:
     """
@@ -670,18 +667,20 @@ def build_template_config(
     dims["y_pixels"] = y_pixels
     dims["z_pixels"] = z_pixels
 
-    if z_pixels > 1:
+    available_generators = {
+        "legacy": "professor.torch_models.Generator",
+        "2D": "professor.torch_models.Generator2D",
+        "3D-triplane": "professor.torch_models.Generator3DTriplane",
+        "3D-spectral": "professor.torch_models.Generator3DSpectral",
+    }
+    conf["model"]["pytorch"]["invocation"]["target"] = available_generators[generator_type]
+
+    if "3D" in generator_type:
         conf["model"]["pytorch"]["invocation"]["params"]["last_layer"]["invocation"]["params"]["n_dims"] = 3
-        if option_3d == 'none':
-            conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
-        elif option_3d == 'triplane':
-            conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
-        elif option_3d == 'spectral':
-            conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DSpectral"
-            # Note: some layers in this model type do not support half precision
-            conf["model"]["pytorch"]["execution"]["half_precision"] = False
-        else:
-            raise Exception(f'Unrecognized 3D option_3d method: {option_3d}')
+
+    # Note: some layers in this model type do not support half precision
+    if generator_type == "3D-spectral":
+        conf["model"]["pytorch"]["execution"]["half_precision"] = False
 
     params = conf["model"]["pytorch"]["invocation"]["params"]
     params["num_channels"] = n_channels
@@ -689,8 +688,7 @@ def build_template_config(
     params["max_features"] = max_features
     params["x_kernel"] = x_kernel
     params["y_kernel"] = y_kernel
-    if z_kernel > 1:
-        params["z_kernel"] = z_kernel
+    params["z_kernel"] = z_kernel
 
     conf["gui"]["napari"]["fields"] = fields
 
