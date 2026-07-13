@@ -205,6 +205,140 @@ class Generator(nn.Module):
         return self.main(input)
 
 
+class UpscaleBlock2D(nn.Module):
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            kernel_size: int | tuple[int, int],
+            stride: int,
+            padding: int,
+            bias: bool,
+            batch_norm: bool = True,
+            upscale_type: str = 'transpose',
+            activation_function: nn.Module | None = None
+        ):
+            super(UpscaleBlock2D, self).__init__()
+
+            layers = []
+            if upscale_type == 'transpose':
+                layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias))
+            elif upscale_type in ['bilinear', 'bicubic', 'nearest']:
+                interp_kwargs = {}
+                if upscale_type in ['bilinear', 'bicubic']:
+                    interp_kwargs['align_corners'] = True
+
+                layers.append(nn.Upsample( scale_factor=stride, mode=upscale_type, **interp_kwargs))
+                layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias))
+            else:
+                raise Exception(f'Unrecognized layer upscale type: {upscale_type}')
+
+            if batch_norm:
+                layers.append(nn.BatchNorm2d(out_channels))
+
+            if activation_function is not None:
+                layers.append(activation_function)
+
+            self.upscaler: nn.Sequential = nn.Sequential(*layers)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return self.upscaler(input)
+    
+
+class GeneratorInterpolate2D(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        act_fun: str = "ReLU",
+        upscale_type: str = "transpose",
+        last_bias: bool = False,
+    ) -> None:
+        super(GeneratorInterpolate2D, self).__init__()
+        self.activation_functions: Dict[str, nn.Module] = {
+            "ReLU": nn.ReLU(inplace=True),
+            "Tanh": nn.Tanh(),
+            "Softplus": nn.Softplus(),
+            "SoftSign": nn.Softsign(),
+            "Mish": nn.Mish(inplace=True),
+            "SiLU": nn.SiLU(inplace=True),
+            "GELU": nn.GELU(),
+            "CELU": nn.SELU(inplace=True),
+            "LeakyReLU": nn.LeakyReLU(inplace=True),
+            "ELU": nn.ELU(inplace=True),
+        }
+        activation_function = self.activation_functions[act_fun]
+
+        n_layers = np.log2(im_size) - 1
+        if np.floor(n_layers) != n_layers:
+            print("warning: output_size ({im_size}) is not a power of 2")
+        n_layers = int(np.floor(n_layers))
+
+        l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
+        first_kernel = (y_kernel, x_kernel)
+        max_kernel = max(first_kernel)
+
+        layers: list[nn.Module] = [first_layer]
+        layers.append(UpscaleBlock2D(
+            input_size,
+            l1_out_features,
+            first_kernel,
+            1,
+            0,
+            bias=False,
+            batch_norm=use_batch_norm,
+            upscale_type='transpose',
+            activation_function=activation_function
+        ))
+
+        target_image = im_size // 2
+        out_features = min_features
+        while target_image > max_kernel:
+            target_image = target_image // 2
+            if out_features * 2 <= l1_out_features:
+                in_features = out_features * 2
+            else:
+                in_features = out_features
+
+            layers.insert(2, UpscaleBlock2D(
+                in_features,
+                out_features,
+                4,
+                2,
+                1,
+                bias=False,
+                batch_norm=use_batch_norm,
+                upscale_type=upscale_type,
+                activation_function=activation_function
+            ))
+            out_features = in_features
+
+        layers.append(UpscaleBlock2D(
+                min_features,
+                num_channels,
+                4,
+                2,
+                1,
+                bias=last_bias,
+                batch_norm=False,
+                upscale_type=upscale_type))
+        layers.append(last_layer)
+
+        self.main: nn.Sequential = nn.Sequential(*layers)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return self.main(input)
+
+
+
 class Generator3D(nn.Module):
     def __init__(
         self,
@@ -320,6 +454,7 @@ class Generator3DTriplane(nn.Module):
         use_batch_norm: bool = True,
         y_kernel: int = 4,
         x_kernel: int = 4,
+        z_kernel: int = 4,
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
