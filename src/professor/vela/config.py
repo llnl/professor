@@ -678,6 +678,8 @@ def build_template_config(
             conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
         elif option_3d == 'spectral':
             conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DSpectral"
+            # Note: some layers in this model type do not support half precision
+            conf["model"]["pytorch"]["execution"]["half_precision"] = False
         else:
             raise Exception(f'Unrecognized 3D option_3d method: {option_3d}')
 

@@ -62,8 +62,10 @@ class ProfessorHelper:
 
         with torch.no_grad():
             tmp = np.array(model_args)
-            x = torch.Tensor(np.reshape(tmp, (1, -1, 1, 1))).half().to(self._device)
-            y = self._model(x).detach().to("cpu").numpy().astype(np.float32)
+            x = torch.Tensor(np.reshape(tmp, (1, -1, 1, 1)))
+            if self._config.half_precision:
+                x = x.half()
+            y = self._model(x.to(self._device)).detach().to("cpu").numpy().astype(np.float32)
             return y
 
 
