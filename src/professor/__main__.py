@@ -117,13 +117,13 @@ def prof_trainer() -> None:
         "--upscale-type",
         type=str,
         default="transpose",
-        help="Data upscaling method (transpose, nearest, bilinear, bicubic)",
+        help="Data upscaling method (transpose, nearest, linear)",
     )
     parser.add_argument(
         "--generator-type",
         type=str,
         default="legacy",
-        help="Generator type (legacy, 2D, 3D-triplane, 3D-spectral, 3D-voxel)",
+        help="Generator type (legacy, 2D, 3D-triplane, 3D-spectral)",
     )
     parser.add_argument(
         "--dataloader_workers",

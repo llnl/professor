@@ -8,7 +8,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torchlayers.upsample import ConvPixelShuffle  # type: ignore[import-untyped]
-from typing import cast, Dict, Iterable, Any
+from typing import cast, Dict, Iterable
+from professor.layers import UpscaleBlock2D, UpscaleBlock3D, UpscaleBlock3DSpectral
 
 
 class RB(nn.Module):
@@ -31,28 +32,27 @@ def weights_init(m: nn.Module) -> None:
 def _build_middle_layer_schedule(
     im_size: int, input_size: Iterable[int], input_features: int, min_features: int
 ) -> tuple[list[int], list[int], list[int]]:
-    layer_input_features: list[int] = []
-    layer_output_features: list[int] = []
-    layer_min_axis: list[int] = []
-    target_image = im_size // 2
-    layer_size = list(input_size)
+    """
+    Helper function to build input features, output features, and current size for
+    the middle layers of a network
+    """
+    min_axis = min(input_size)
+    n_layers = int(np.ceil(np.log2(im_size // (2 * min_axis))))
 
-    while min(layer_size) < target_image:
-        layer_input_features.append(input_features)
-        input_features = max(min_features, input_features // 2)
-        layer_output_features.append(input_features)
-        layer_size = [2 * x for x in layer_size]
-        layer_min_axis.append(min(layer_size))
-
-    if len(layer_output_features):
-        layer_output_features[-1] = min_features
-    else:
-        print("Model configuration requires no middle layers")
+    f_back = [min(input_features, min_features * 2**ii) for ii in range(n_layers + 1)]
+    f_back[-1] = input_features
+    f_forward = f_back[::-1]
+    layer_input_features = f_forward[:-1]
+    layer_output_features = f_forward[1:]
+    layer_min_axis = [min_axis * 2**ii for ii in range(n_layers)]
 
     return layer_input_features, layer_output_features, layer_min_axis
 
 
 def build_activation(activation_name: str) -> nn.Module:
+    """
+    Build an instance of an activation layer by name
+    """
     activation_type = getattr(nn, activation_name)
     if activation_type is None:
         raise Exception(f"Could not find target activation function: {activation_name}")
@@ -155,11 +155,9 @@ class Generator(nn.Module):
         first_layer: nn.Module = nn.Identity(),
         last_layer: nn.Module = nn.Tanh(),
         use_batch_norm: bool = True,
-        z_kernel: int = -1,
         y_kernel: int = 4,
         x_kernel: int = 4,
         act_fun: str = "ReLU",
-        upscale_type: str = "transpose",
         last_bias: bool = False,
     ) -> None:
         super(Generator, self).__init__()
@@ -243,46 +241,6 @@ class Generator(nn.Module):
         return self.main(input)
 
 
-class UpscaleBlock2D(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int | tuple[int, int] = 4,
-        stride: int = 1,
-        padding: int = 1,
-        bias: bool = False,
-        batch_norm: bool = True,
-        upscale_type: str = "transpose",
-        activation_function: nn.Module | None = None,
-    ):
-        super(UpscaleBlock2D, self).__init__()
-
-        layers = []
-        if upscale_type == "transpose":
-            layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias))
-        elif upscale_type in ["bilinear", "bicubic", "nearest"]:
-            interp_kwargs = {}
-            if upscale_type in ["bilinear", "bicubic"]:
-                interp_kwargs["align_corners"] = True
-
-            layers.append(nn.Upsample(scale_factor=stride, mode=upscale_type, **interp_kwargs))
-            layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias))
-        else:
-            raise Exception(f"Unrecognized layer upscale type: {upscale_type}")
-
-        if batch_norm:
-            layers.append(nn.BatchNorm2d(out_channels))
-
-        if activation_function is not None:
-            layers.append(activation_function)
-
-        self.upscaler: nn.Sequential = nn.Sequential(*layers)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.upscaler(input)
-
-
 class Generator2D(nn.Module):
     def __init__(
         self,
@@ -302,6 +260,7 @@ class Generator2D(nn.Module):
     ) -> None:
         super(Generator2D, self).__init__()
 
+        # Choose starting size
         n_layers = np.log2(im_size) - 1
         if np.floor(n_layers) != n_layers:
             print("warning: output_size ({im_size}) is not a power of 2")
@@ -309,32 +268,28 @@ class Generator2D(nn.Module):
         l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
         first_kernel = (y_kernel, x_kernel)
 
-        tmp_size = [(1, 1), (input_size, l1_out_features)]
+        # Build the first layers
         layers: list[nn.Module] = [first_layer]
-        layers.append(
-            UpscaleBlock2D(
-                input_size,
-                l1_out_features,
-                kernel_size=first_kernel,
-                stride=1,
-                padding=0,
-                bias=False,
-                batch_norm=use_batch_norm,
-                upscale_type="transpose",
-                activation_function=build_activation(act_fun),
-            )
-        )
+        reshape_layers: list[nn.Module] = [
+            nn.ConvTranspose2d(input_size, l1_out_features, first_kernel, 1, 0, bias=False)
+        ]
+        if use_batch_norm:
+            reshape_layers.append(nn.BatchNorm2d(l1_out_features))
+        reshape_layers.append(build_activation(act_fun))
+        layers.append(nn.Sequential(*reshape_layers))
+
+        # Build middle layers
+        upscale_kernel_size = 3
+        if upscale_type == "transpose":
+            upscale_kernel_size = 4
 
         layer_defs = _build_middle_layer_schedule(im_size, first_kernel, l1_out_features, min_features)
         for in_features, out_features, _ in zip(*layer_defs):
-            tmp_size.append((in_features, out_features))
             layers.append(
                 UpscaleBlock2D(
                     in_features,
                     out_features,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
+                    kernel_size=upscale_kernel_size,
                     bias=False,
                     batch_norm=use_batch_norm,
                     upscale_type=upscale_type,
@@ -346,9 +301,7 @@ class Generator2D(nn.Module):
             UpscaleBlock2D(
                 min_features,
                 num_channels,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=upscale_kernel_size,
                 bias=last_bias,
                 batch_norm=False,
                 upscale_type=upscale_type,
@@ -565,58 +518,6 @@ class Generator3DTriplane(nn.Module):
         return self.last_layer(b)
 
 
-class UpscaleBlock3DSpectral(nn.Module):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        num_modes: tuple[int, int, int] = (8, 8, 8),
-        kernel_size: int | tuple[int, int, int] = 4,
-        stride: int = 1,
-        padding: int = 1,
-        img_size: int = 1,
-        bias: bool = False,
-        batch_norm: bool = True,
-        upscale_type: str = "transpose",
-        activation_function: nn.Module | None = None,
-    ):
-        from neuralop.layers.spectral_convolution import SpectralConv  # type: ignore
-
-        super(UpscaleBlock3DSpectral, self).__init__()
-
-        layers = []
-        interp_kwargs = {}
-        if upscale_type in ["bilinear", "bicubic"]:
-            interp_kwargs["align_corners"] = True
-
-        if img_size >= 32:
-            if upscale_type == "transpose":
-                layers.append(
-                    SpectralConv(in_features, out_features, num_modes, resolution_scaling_factor=stride, bias=bias)
-                )
-            elif upscale_type in ["bilinear", "bicubic", "nearest"]:
-                layers.append(nn.Upsample(scale_factor=2, mode=upscale_type, **interp_kwargs))
-                layers.append(SpectralConv(in_features, out_features, num_modes, bias=bias))
-
-        else:
-            if upscale_type in ["bilinear", "bicubic", "nearest"]:
-                layers.append(nn.Upsample(scale_factor=stride, mode=upscale_type, **interp_kwargs))
-                layers.append(nn.Conv3d(in_features, out_features, kernel_size, stride, padding, bias=bias))
-            else:
-                layers.append(nn.ConvTranspose3d(in_features, out_features, kernel_size, stride, padding, bias=bias))
-
-        if batch_norm:
-            layers.append(nn.BatchNorm3d(out_features))
-
-        if activation_function is not None:
-            layers.append(activation_function)
-
-        self.upscaler: nn.Sequential = nn.Sequential(*layers)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.upscaler(input)
-
-
 class Generator3DSpectral(nn.Module):
     def __init__(
         self,
@@ -651,37 +552,47 @@ class Generator3DSpectral(nn.Module):
         out_features = np.minimum(min_features * 2**n_layers, max_features)
         layer_size = (x_kernel, y_kernel, z_kernel)
 
-        # Build the first layers
+        # Build first layers
         layers: list[nn.Module] = [self.first_layer]
-        layers.append(
-            UpscaleBlock3DSpectral(
-                input_size,
-                out_features,
-                num_modes=(n_modes, n_modes, n_modes),
-                kernel_size=layer_size,
-                padding=0,
-                batch_norm=self.use_batch_norm,
-                upscale_type="transpose",
-                activation_function=build_activation(act_fun),
-            )
-        )
+        reshape_layers: list[nn.Module] = [nn.ConvTranspose3d(input_size, out_features, layer_size, 1, 0, bias=False)]
+        if use_batch_norm:
+            reshape_layers.append(nn.BatchNorm3d(out_features))
+        reshape_layers.append(build_activation(act_fun))
+        layers.append(nn.Sequential(*reshape_layers))
 
-        # Build the middle layers
+        # Build middle layers
+        upscale_kernel_size = 3
+        if upscale_type == "transpose":
+            upscale_kernel_size = 4
+
         layer_defs = _build_middle_layer_schedule(im_size, layer_size, out_features, min_features)
         for in_features, out_features, min_axis in zip(*layer_defs):
-            layers.append(
-                UpscaleBlock3DSpectral(
-                    in_features,
-                    out_features,
-                    num_modes=(n_modes, n_modes, n_modes),
-                    kernel_size=4,
-                    stride=2,
-                    img_size=min_axis,
-                    batch_norm=self.use_batch_norm,
-                    upscale_type=upscale_type,
-                    activation_function=build_activation(act_fun),
+            if min_axis >= 32:
+                # Limit the number of modes for small images
+                axis_modes = min(min_axis // 16, n_modes)
+                layers.append(
+                    UpscaleBlock3DSpectral(
+                        in_features,
+                        out_features,
+                        num_modes=(axis_modes, axis_modes, axis_modes),
+                        upscale_factor=2,
+                        batch_norm=self.use_batch_norm,
+                        upscale_type=upscale_type,
+                        activation_function=build_activation(act_fun),
+                    )
                 )
-            )
+            else:
+                layers.append(
+                    UpscaleBlock3D(
+                        in_features,
+                        out_features,
+                        kernel_size=upscale_kernel_size,
+                        upscale_factor=2,
+                        batch_norm=self.use_batch_norm,
+                        upscale_type=upscale_type,
+                        activation_function=build_activation(act_fun),
+                    )
+                )
 
         # Build the final layers
         layers.append(
@@ -689,9 +600,7 @@ class Generator3DSpectral(nn.Module):
                 min_features,
                 num_channels,
                 num_modes=(n_modes, n_modes, n_modes),
-                kernel_size=4,
-                stride=2,
-                img_size=im_size // 2,
+                upscale_factor=2,
                 upscale_type=upscale_type,
             )
         )
@@ -1166,14 +1075,90 @@ class ConvAutoencoder(nn.Module):
         return self.decoder(x)
 
 
-def build_generator(generator_type: str, **generator_kwargs: dict[str, Any]) -> nn.Module:
+def build_generator(
+    generator_type: str,
+    input_size: int = 1,
+    im_size: int = 1,
+    num_channels: int = 1,
+    min_features: int = 64,
+    max_features: int = 512,
+    first_layer: nn.Module = nn.Identity(),
+    last_layer: nn.Module = nn.Tanh(),
+    use_batch_norm: bool = True,
+    y_kernel: int = 4,
+    x_kernel: int = 4,
+    z_kernel: int = 4,
+    act_fun: str = "ReLU",
+    upscale_type: str = "nearest",
+    last_bias: bool = False,
+) -> nn.Module:
 
     if generator_type == "legacy":
-        return Generator(**generator_kwargs)
+        return Generator(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            last_bias=last_bias,
+        )
+
     elif generator_type == "2D":
-        return Generator2D(**generator_kwargs)
+        return Generator2D(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            upscale_type=upscale_type,
+            last_bias=last_bias,
+        )
+
     elif generator_type == "3D-triplane":
-        return Generator3DTriplane(**generator_kwargs)
+        return Generator3DTriplane(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            z_kernel=z_kernel,
+            act_fun=act_fun,
+            upscale_type=upscale_type,
+            last_bias=last_bias,
+        )
+
     elif generator_type == "3D-spectral":
-        return Generator3DSpectral(**generator_kwargs)
+        return Generator3DSpectral(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            z_kernel=z_kernel,
+            act_fun=act_fun,
+            upscale_type=upscale_type,
+            last_bias=last_bias,
+        )
     raise Exception(f"Unrecognized generator type: {generator_type}")
