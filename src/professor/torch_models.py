@@ -1089,7 +1089,7 @@ def build_generator(
     x_kernel: int = 4,
     z_kernel: int = 4,
     act_fun: str = "ReLU",
-    upscale_type: str = "nearest",
+    upscale_type: str = "transpose",
     last_bias: bool = False,
 ) -> nn.Module:
 

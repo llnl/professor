@@ -410,6 +410,8 @@ def main(args: argparse.Namespace) -> None:
     finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
 
     # Select generator strategy
+    # Note: act_fun, use_batch_norm, and last_bias are not wired into
+    # the user argument parser
     model = build_generator(
         args.generator_type,
         input_size=n_input,
@@ -422,6 +424,7 @@ def main(args: argparse.Namespace) -> None:
         x_kernel=args.x_kernel,
         y_kernel=args.y_kernel,
         z_kernel=args.z_kernel,
+        upscale_type=args.upscale_type,
     )
 
     if rank == 0:
