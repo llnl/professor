@@ -651,6 +651,7 @@ def build_template_config(
     y_kernel: int = 4,
     z_kernel: int = 0,
     generator_type: str = "legacy",
+    upscale_type: str = "transpose",
     fields: list[str] = ["field"],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
 ) -> None:
@@ -665,7 +666,8 @@ def build_template_config(
     dims["n_inputs"] = n_inputs
     dims["x_pixels"] = x_pixels
     dims["y_pixels"] = y_pixels
-    dims["z_pixels"] = z_pixels
+    if z_pixels:
+        dims["z_pixels"] = z_pixels
 
     available_generators = {
         "legacy": "professor.torch_models.Generator",
@@ -688,7 +690,12 @@ def build_template_config(
     params["max_features"] = max_features
     params["x_kernel"] = x_kernel
     params["y_kernel"] = y_kernel
-    params["z_kernel"] = z_kernel
+
+    if z_kernel:
+        params["z_kernel"] = z_kernel
+
+    if generator_type in ["2D", "3D-triplane", "3D-spectral"]:
+        params["upscale_type"] = upscale_type
 
     conf["gui"]["napari"]["fields"] = fields
 
