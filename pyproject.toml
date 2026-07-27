@@ -64,6 +64,7 @@ dev = [
 
 [project.scripts]
 prof-trainer = "professor.__main__:prof_trainer"
+prof-eval = "professor.model_eval:prof_eval"
 
 [project.gui-scripts]
 prof-vis = "professor.vela.__main__:main"

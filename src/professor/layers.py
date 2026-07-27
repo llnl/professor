@@ -267,9 +267,9 @@ class UpscaleBlock3D(nn.Module):
 
             layers.append(nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs))
             if separable_conv:
-                layers.append(nn.Conv3d(in_features, in_features, (kernel_size, 1, 1), stride=1, padding="same", bias=bias))
-                layers.append(nn.Conv3d(in_features, in_features, (1, kernel_size, 1), stride=1, padding="same", bias=bias))
-                layers.append(nn.Conv3d(in_features, out_features, (1, 1, kernel_size), stride=1, padding="same", bias=bias))
+                layers.append(nn.Conv3d(in_features, out_features, (kernel_size, 1, 1), stride=1, padding="same", bias=bias))
+                layers.append(nn.Conv3d(out_features, out_features, (1, kernel_size, 1), stride=1, padding="same", bias=bias))
+                layers.append(nn.Conv3d(out_features, out_features, (1, 1, kernel_size), stride=1, padding="same", bias=bias))
             else:
                 layers.append(nn.Conv3d(in_features, out_features, kernel_size, stride=1, padding="same", bias=bias))
         else:
