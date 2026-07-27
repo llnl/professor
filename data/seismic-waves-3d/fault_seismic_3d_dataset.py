@@ -23,13 +23,32 @@ exclusion radius.
 """
 
 import argparse
-import os
 from pathlib import Path
-import numpy as np
-from numba import njit, prange
-from mpi4py import MPI
-from scipy.stats import qmc
+
 import h5py
+import numpy as np
+from mpi4py import MPI
+from numba import njit, prange
+from scipy.stats import qmc
+
+INPUT_NAMES = (
+    "source_x",
+    "source_y",
+    "source_z",
+    "strike",
+    "dip",
+    "rake",
+    "vp",
+    "vs",
+    "density",
+    "time",
+)
+
+LABEL_NAMES = (
+    "displacement_x",
+    "displacement_y",
+    "displacement_z",
+)
 
 
 @njit(cache=True)
@@ -77,9 +96,7 @@ def moment_tensor_from_fault(strike, dip, rake, moment):
     mt = np.empty((3, 3), dtype=np.float64)
     for i in range(3):
         for j in range(3):
-            mt[i, j] = moment * (
-                slip_vec[i] * normal_vec[j] + slip_vec[j] * normal_vec[i]
-            )
+            mt[i, j] = moment * (slip_vec[i] * normal_vec[j] + slip_vec[j] * normal_vec[i])
     return mt
 
 
@@ -200,15 +217,98 @@ def sample_parameter_table(args):
     return table
 
 
+def input_scaling_bounds(args, time_upper):
+    margin = args.source_margin
+    source_min = margin
+    source_max = args.domain_size - margin
+    vs_min = args.vp_min / args.vp_vs_max
+    vs_max = args.vp_max / args.vp_vs_min
+
+    lower = np.array(
+        [
+            source_min,
+            source_min,
+            source_min,
+            0.0,
+            args.dip_min,
+            -np.pi,
+            args.vp_min,
+            vs_min,
+            args.density_min,
+            args.t_min,
+        ],
+        dtype=np.float64,
+    )
+    upper = np.array(
+        [
+            source_max,
+            source_max,
+            source_max,
+            2.0 * np.pi,
+            args.dip_max,
+            np.pi,
+            args.vp_max,
+            vs_max,
+            args.density_max,
+            time_upper,
+        ],
+        dtype=np.float64,
+    )
+    return lower, upper
+
+
+def scale_inputs_to_unit_range(inputs, lower, upper):
+    return (inputs - lower) / (upper - lower)
+
+
+def threshold_fields_for_write(fields):
+    fields[np.abs(fields) < 1.0e-3] = 0.0
+
+
+def update_ranges(inputs, fields, input_min, input_max, label_min, label_max):
+    input_min[:] = np.minimum(input_min, inputs)
+    input_max[:] = np.maximum(input_max, inputs)
+
+    flattened_fields = fields.reshape(fields.shape[0], -1)
+    label_min[:] = np.minimum(label_min, np.min(flattened_fields, axis=1))
+    label_max[:] = np.maximum(label_max, np.max(flattened_fields, axis=1))
+
+
+def yaml_float(value):
+    if np.isfinite(value):
+        return format(float(value), ".9g")
+    return "null"
+
+
+def write_scaling_yaml(filename, input_min, input_max, label_min, label_max):
+    with open(filename, mode="w", encoding="utf-8") as scaling_file:
+        scaling_file.write("inputs:\n")
+        for index, name in enumerate(INPUT_NAMES):
+            scaling_file.write(f"  {name}:\n")
+            scaling_file.write(f"    min: {yaml_float(input_min[index])}\n")
+            scaling_file.write(f"    max: {yaml_float(input_max[index])}\n")
+
+        scaling_file.write("labels:\n")
+        for index, name in enumerate(LABEL_NAMES):
+            scaling_file.write(f"  {name}:\n")
+            scaling_file.write(f"    min: {yaml_float(label_min[index])}\n")
+            scaling_file.write(f"    max: {yaml_float(label_max[index])}\n")
+
+
 def write_sample(
     filename,
     inputs,
     fields,
+    inputs_scaled,
+    input_lower,
+    input_upper,
 ):
-    fields[np.abs(fields) < 1.0e-3] = 0.0
-
     with h5py.File(filename, mode="w") as h5:
-        h5.create_dataset("inputs", data=inputs.astype(np.float32), dtype="f")
+        inputs_dataset = h5.create_dataset("inputs", data=inputs.astype(np.float32), dtype="f")
+        inputs_dataset.attrs["scaled_to_unit_range"] = inputs_scaled
+        if inputs_scaled:
+            inputs_dataset.attrs["unit_range_lower"] = input_lower.astype(np.float32)
+            inputs_dataset.attrs["unit_range_upper"] = input_upper.astype(np.float32)
         h5.create_dataset(
             "fields",
             data=fields,
@@ -220,6 +320,7 @@ def write_sample(
 
 def write_png(filename, fields):
     import matplotlib
+
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
 
@@ -243,9 +344,7 @@ def write_png(filename, fields):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Generate HDF5 samples of far-field 3D seismic waves."
-    )
+    parser = argparse.ArgumentParser(description="Generate HDF5 samples of far-field 3D seismic waves.")
     parser.add_argument("-n", "--nsamples", default=16, type=int)
     parser.add_argument("-o", "--output-dir", default="fault_seismic_3d_data")
     parser.add_argument("--seed", default=12345, type=int)
@@ -272,6 +371,11 @@ def parse_args():
     parser.add_argument("--dip-max", default=float(np.deg2rad(90.0)), type=float)
     parser.add_argument("--moment", default=1.0e13, type=float)
     parser.add_argument("--displacement-scale", default=40.0, type=float)
+    parser.add_argument(
+        "--scale-inputs",
+        action="store_true",
+        help="write each HDF5 inputs value min-max scaled to the unit range",
+    )
     parser.add_argument("--write-png", action="store_true")
 
     return parser.parse_args()
@@ -304,6 +408,8 @@ def validate_args(args):
         raise ValueError("moment must be positive")
     if args.displacement_scale <= 0.0:
         raise ValueError("displacement-scale must be positive")
+    if args.scale_inputs and args.t_max <= args.t_min:
+        raise ValueError("scaled inputs require t-max > t-min")
 
 
 def main():
@@ -320,6 +426,11 @@ def main():
     times = np.arange(args.t_min, args.t_max + 0.5 * args.dt, args.dt)
     _, _, _, points = build_points(args.nx, args.ny, args.nz, args.domain_size)
     parameter_table = sample_parameter_table(args)
+    input_lower, input_upper = input_scaling_bounds(args, max(args.t_max, times[-1]))
+    local_input_min = np.full(len(INPUT_NAMES), np.inf, dtype=np.float64)
+    local_input_max = np.full(len(INPUT_NAMES), -np.inf, dtype=np.float64)
+    local_label_min = np.full(len(LABEL_NAMES), np.inf, dtype=np.float64)
+    local_label_max = np.full(len(LABEL_NAMES), -np.inf, dtype=np.float64)
 
     if rank == 0:
         print(args, flush=True)
@@ -335,7 +446,8 @@ def main():
             "time steps on",
             size,
             "MPI ranks",
-            flush=True)
+            flush=True,
+        )
 
     for sample in range(args.nsamples):
         if sample % size != rank:
@@ -383,17 +495,52 @@ def main():
                 ],
                 dtype=np.float64,
             )
+            if args.scale_inputs:
+                inputs = scale_inputs_to_unit_range(inputs, input_lower, input_upper)
+            inputs = inputs.astype(np.float32)
+            threshold_fields_for_write(fields)
+            update_ranges(
+                inputs,
+                fields,
+                local_input_min,
+                local_input_max,
+                local_label_min,
+                local_label_max,
+            )
             filename = output_dir / ("case" + str(case).zfill(8) + ".h5")
-            write_sample(filename, inputs, fields)
+            write_sample(
+                filename,
+                inputs,
+                fields,
+                args.scale_inputs,
+                input_lower,
+                input_upper,
+            )
             if args.write_png:
                 write_png(filename.with_suffix(".png"), fields)
 
         if rank == 0:
-            print(f'{sample}/{args.nsamples}', flush=True)
+            print(f"{sample}/{args.nsamples}", flush=True)
+
+    global_input_min = np.empty_like(local_input_min)
+    global_input_max = np.empty_like(local_input_max)
+    global_label_min = np.empty_like(local_label_min)
+    global_label_max = np.empty_like(local_label_max)
+    comm.Reduce(local_input_min, global_input_min, op=MPI.MIN, root=0)
+    comm.Reduce(local_input_max, global_input_max, op=MPI.MAX, root=0)
+    comm.Reduce(local_label_min, global_label_min, op=MPI.MIN, root=0)
+    comm.Reduce(local_label_max, global_label_max, op=MPI.MAX, root=0)
 
     comm.Barrier()
     if rank == 0:
-        print('Done!', flush=True)
+        write_scaling_yaml(
+            output_dir / "scaling.yaml",
+            global_input_min,
+            global_input_max,
+            global_label_min,
+            global_label_max,
+        )
+        print("Done!", flush=True)
 
 
 if __name__ == "__main__":
