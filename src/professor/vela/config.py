@@ -674,6 +674,7 @@ def build_template_config(
         "2D": "professor.torch_models.Generator2D",
         "3D-triplane": "professor.torch_models.Generator3DTriplane",
         "3D-spectral": "professor.torch_models.Generator3DSpectral",
+        "3D-voxel": "professor.torch_models.Generator3DVoxel",
     }
     conf["model"]["pytorch"]["invocation"]["target"] = available_generators[generator_type]
 
@@ -694,7 +695,7 @@ def build_template_config(
     if z_kernel:
         params["z_kernel"] = z_kernel
 
-    if generator_type in ["2D", "3D-triplane", "3D-spectral"]:
+    if generator_type in ["2D", "3D-triplane", "3D-spectral", "3D-voxel"]:
         params["upscale_type"] = upscale_type
 
     conf["gui"]["napari"]["fields"] = fields

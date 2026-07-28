@@ -190,40 +190,75 @@ class UpscaleBlock2D(nn.Module):
         out_channels: int,
         kernel_size: int = 4,
         upscale_factor: int = 2,
+        residual: bool = False,
         bias: bool = False,
         batch_norm: bool = True,
         upscale_type: str = "transpose",
         activation_function: nn.Module | None = None,
     ):
-        super(UpscaleBlock2D, self).__init__()
-        layers = []
+        super().__init__()
+        self._residual: bool = residual
 
-        if upscale_type == "transpose":
-            padding = (kernel_size - upscale_factor) // 2
-            layers.append(
-                nn.ConvTranspose2d(in_channels, out_channels, kernel_size, upscale_factor, padding, bias=bias)
+        # Check upscaling options
+        conv_upscale = upscale_type == "transpose"
+        if self._residual and conv_upscale and (kernel_size - upscale_factor) % 2 != 0:
+            raise ValueError(
+                "UpscaleBlock2D with residual=True and upscale_type='transpose' "
+                "requires kernel_size - upscale_factor to be even."
             )
-        elif upscale_type in ["linear", "nearest"]:
-            interp_kwargs = {}
-            if "linear" in upscale_type:
-                upscale_type = "bilinear"
-                interp_kwargs["align_corners"] = True
 
-            layers.append(nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs))
-            layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding="same", bias=bias))
+        interp_kwargs = {}
+        if "linear" in upscale_type:
+            upscale_type = "bilinear"
+            interp_kwargs["align_corners"] = True
+        if self._residual and conv_upscale:
+            upscale_type = "bilinear"
+
+        # Build the upsampler
+        self.skip: nn.Module | None = None
+        if upscale_type in ["bilinear", "nearest"]:
+            self.skip = nn.Sequential(
+                nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
+                nn.Conv2d(in_channels, out_channels, 1, stride=1, padding="same", bias=False),
+            )
+        elif upscale_type != "transpose":
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+
+        self.main: nn.Module
+        if conv_upscale:
+            padding = (kernel_size - upscale_factor) // 2
+            self.main = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, upscale_factor, padding, bias=bias)
+
         else:
-            raise Exception(f"Unrecognized layer upscale type: {upscale_type}")
+            self.main = nn.Sequential(
+                nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
+                nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding="same", bias=bias),
+            )
 
+        self.norm: nn.Module
         if batch_norm:
-            layers.append(nn.BatchNorm2d(out_channels))
+            self.norm = nn.BatchNorm2d(out_channels)
+        else:
+            self.norm = nn.Identity()
 
+        self.activation: nn.Module
         if activation_function is not None:
-            layers.append(activation_function)
-
-        self.upscaler: nn.Sequential = nn.Sequential(*layers)
+            self.activation = activation_function
+        else:
+            self.activation = nn.Identity()
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.upscaler(input)
+        if self._residual:
+            s = self.skip(input)  # type: ignore
+            x = self.main(input)
+            y = self.norm(x)
+            z = s + y
+            return self.activation(z)
+
+        else:
+            x = self.main(input)
+            y = self.norm(x)
+            return self.activation(y)
 
 
 class UpscaleBlock3D(nn.Module):
@@ -239,7 +274,7 @@ class UpscaleBlock3D(nn.Module):
         separable_conv: bool = True,
         activation_function: nn.Module | None = None,
     ):
-        super(UpscaleBlock3D, self).__init__()
+        super().__init__()
 
         layers = []
         if upscale_type == "transpose":
@@ -301,7 +336,7 @@ class UpscaleBlock3DSpectral(nn.Module):
     ):
         from neuralop.layers.spectral_convolution import SpectralConv  # type: ignore
 
-        super(UpscaleBlock3DSpectral, self).__init__()
+        super().__init__()
 
         layers = []
         if upscale_type == "transpose":
