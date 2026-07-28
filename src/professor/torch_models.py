@@ -256,9 +256,10 @@ class Generator2D(nn.Module):
         x_kernel: int = 4,
         act_fun: str = "ReLU",
         upscale_type: str = "nearest",
+        residual: bool = False,
         last_bias: bool = False,
     ) -> None:
-        super(Generator2D, self).__init__()
+        super().__init__()
 
         # Choose starting size
         n_layers = np.log2(im_size) - 1
@@ -294,6 +295,7 @@ class Generator2D(nn.Module):
                     batch_norm=use_batch_norm,
                     upscale_type=upscale_type,
                     activation_function=build_activation(act_fun),
+                    residual=residual
                 )
             )
 
@@ -459,6 +461,7 @@ class Generator3DTriplane(nn.Module):
             upscale_type=upscale_type,
             act_fun=act_fun,
             last_bias=last_bias,
+            residual=True
         )
         self.generator_y: Generator2D = Generator2D(
             input_size,
@@ -473,6 +476,7 @@ class Generator3DTriplane(nn.Module):
             upscale_type=upscale_type,
             act_fun=act_fun,
             last_bias=last_bias,
+            residual=True
         )
         self.generator_z: Generator2D = Generator2D(
             input_size,
@@ -487,6 +491,7 @@ class Generator3DTriplane(nn.Module):
             upscale_type=upscale_type,
             act_fun=act_fun,
             last_bias=last_bias,
+            residual=True
         )
 
         self.reconstruction_layers = nn.Sequential(
@@ -589,6 +594,7 @@ class Generator3DSpectral(nn.Module):
                         batch_norm=self.use_batch_norm,
                         upscale_type=upscale_type,
                         activation_function=build_activation(act_fun),
+                        residual=True
                     )
                 )
             else:
@@ -601,6 +607,7 @@ class Generator3DSpectral(nn.Module):
                         batch_norm=self.use_batch_norm,
                         upscale_type=upscale_type,
                         activation_function=build_activation(act_fun),
+                        residual=True
                     )
                 )
 
@@ -690,6 +697,7 @@ class Generator3DVoxel(nn.Module):
                     batch_norm=self.use_batch_norm,
                     upscale_type=upscale_type,
                     activation_function=build_activation(act_fun),
+                    residual=True
                 )
             )
 
