@@ -10,7 +10,9 @@ Each sample is a point double-couple fault source in a homogeneous isotropic
     inputs:  sampled source/material parameters plus the output time
     fields:  displacement field with shape (3, nx, ny, nz)
 
-One file is written for each realization/time-step pair.
+One file is written for each realization/time-step pair. With --split-z, one
+file is written for each realization/time-step/z-slice tuple, fields has shape
+(3, nx, ny), and the normalized z position is appended to the inputs.
 
 The displacement uses the far-field moment tensor approximation
 
@@ -24,14 +26,20 @@ exclusion radius.
 
 import argparse
 from pathlib import Path
+from typing import Any, TypeAlias
 
 import h5py
 import numpy as np
 from mpi4py import MPI
 from numba import njit, prange
+from numpy.typing import NDArray
 from scipy.stats import qmc
 
-INPUT_NAMES = (
+Float64Array: TypeAlias = NDArray[np.float64]
+Float32Array: TypeAlias = NDArray[np.float32]
+BoolOrArray: TypeAlias = bool | np.bool_
+
+BASE_INPUT_NAMES = (
     "source_x",
     "source_y",
     "source_z",
@@ -39,10 +47,11 @@ INPUT_NAMES = (
     "dip",
     "rake",
     "vp",
-    "vs",
-    "density",
+    "vp_vs",
     "time",
 )
+
+Z_INPUT_NAME = "z_position"
 
 LABEL_NAMES = (
     "displacement_x",
@@ -52,7 +61,7 @@ LABEL_NAMES = (
 
 
 @njit(cache=True)
-def gaussian_moment_rate(t, duration):
+def gaussian_moment_rate(t: float, duration: float) -> float:
     """Unit-area Gaussian moment-rate pulse centered at 3 sigma."""
     sigma = duration / 6.0
     center = 0.5 * duration
@@ -61,7 +70,7 @@ def gaussian_moment_rate(t, duration):
 
 
 @njit(cache=True)
-def moment_tensor_from_fault(strike, dip, rake, moment):
+def moment_tensor_from_fault(strike: float, dip: float, rake: float, moment: float) -> Float64Array:
     """Double-couple moment tensor for ENU coordinates.
 
     x is east, y is north, and z is up.  Strike is clockwise from north, dip is
@@ -102,19 +111,19 @@ def moment_tensor_from_fault(strike, dip, rake, moment):
 
 @njit(parallel=True, cache=True)
 def far_field_displacement(
-    points,
-    times,
-    source,
-    strike,
-    dip,
-    rake,
-    vp,
-    vs,
-    density,
-    moment,
-    duration,
-    exclusion_radius,
-):
+    points: Float64Array,
+    times: Float64Array,
+    source: Float64Array,
+    strike: float,
+    dip: float,
+    rake: float,
+    vp: float,
+    vs: float,
+    density: float,
+    moment: float,
+    duration: float,
+    exclusion_radius: float,
+) -> Float32Array:
     npoints = points.shape[0]
     nt = times.shape[0]
     out = np.zeros((nt, 3, npoints), dtype=np.float32)
@@ -163,7 +172,12 @@ def far_field_displacement(
     return out
 
 
-def build_points(nx, ny, nz, domain_size):
+def build_points(
+    nx: int,
+    ny: int,
+    nz: int,
+    domain_size: float,
+) -> tuple[Float64Array, Float64Array, Float64Array, Float64Array]:
     x = np.linspace(0.0, domain_size, nx, dtype=np.float64)
     y = np.linspace(0.0, domain_size, ny, dtype=np.float64)
     z = np.linspace(0.0, domain_size, nz, dtype=np.float64)
@@ -172,11 +186,11 @@ def build_points(nx, ny, nz, domain_size):
     return x, y, z, points
 
 
-def sample_parameter_table(args):
+def sample_parameter_table(args: argparse.Namespace) -> Float64Array:
     if args.nsamples == 0:
-        return np.empty((0, 9), dtype=np.float64)
+        return np.empty((0, 8), dtype=np.float64)
 
-    sampler = qmc.LatinHypercube(d=9, seed=args.seed)
+    sampler = qmc.LatinHypercube(d=8, seed=args.seed)
     unit = sampler.random(n=args.nsamples)
     margin = args.source_margin
     source_min = margin
@@ -192,7 +206,6 @@ def sample_parameter_table(args):
             -np.pi,
             args.vp_min,
             args.vp_vs_min,
-            args.density_min,
         ],
         dtype=np.float64,
     )
@@ -206,23 +219,24 @@ def sample_parameter_table(args):
             np.pi,
             args.vp_max,
             args.vp_vs_max,
-            args.density_max,
         ],
         dtype=np.float64,
     )
 
-    scaled = qmc.scale(unit, lower, upper)
-    table = scaled.copy()
-    table[:, 7] = scaled[:, 6] / scaled[:, 7]
-    return table
+    return qmc.scale(unit, lower, upper)
 
 
-def input_scaling_bounds(args, time_upper):
+def input_names(split_z: bool) -> tuple[str, ...]:
+    names = BASE_INPUT_NAMES
+    if split_z:
+        names = (*BASE_INPUT_NAMES, Z_INPUT_NAME)
+    return names
+
+
+def input_scaling_bounds(args: argparse.Namespace, time_upper: float) -> tuple[Float64Array, Float64Array]:
     margin = args.source_margin
     source_min = margin
     source_max = args.domain_size - margin
-    vs_min = args.vp_min / args.vp_vs_max
-    vs_max = args.vp_max / args.vp_vs_min
 
     lower = np.array(
         [
@@ -233,8 +247,7 @@ def input_scaling_bounds(args, time_upper):
             args.dip_min,
             -np.pi,
             args.vp_min,
-            vs_min,
-            args.density_min,
+            args.vp_vs_min,
             args.t_min,
         ],
         dtype=np.float64,
@@ -248,24 +261,39 @@ def input_scaling_bounds(args, time_upper):
             args.dip_max,
             np.pi,
             args.vp_max,
-            vs_max,
-            args.density_max,
+            args.vp_vs_max,
             time_upper,
         ],
         dtype=np.float64,
     )
+    if args.split_z:
+        lower = np.append(lower, 0.0)
+        upper = np.append(upper, 1.0)
+
     return lower, upper
 
 
-def scale_inputs_to_unit_range(inputs, lower, upper):
+def scale_inputs_to_unit_range(inputs: Float64Array, lower: Float64Array, upper: Float64Array) -> Float64Array:
     return (inputs - lower) / (upper - lower)
 
 
-def threshold_fields_for_write(fields):
+def threshold_fields_for_write(fields: Float32Array) -> None:
     fields[np.abs(fields) < 1.0e-3] = 0.0
 
 
-def update_ranges(inputs, fields, input_min, input_max, label_min, label_max):
+def clip_displacement_fields(fields: Float32Array) -> None:
+    displacement_limit = np.nextafter(np.float32(1.0), np.float32(0.0))
+    np.clip(fields, -displacement_limit, displacement_limit, out=fields)
+
+
+def update_ranges(
+    inputs: Float32Array,
+    fields: Float32Array,
+    input_min: Float64Array,
+    input_max: Float64Array,
+    label_min: Float64Array,
+    label_max: Float64Array,
+) -> None:
     input_min[:] = np.minimum(input_min, inputs)
     input_max[:] = np.maximum(input_max, inputs)
 
@@ -274,16 +302,23 @@ def update_ranges(inputs, fields, input_min, input_max, label_min, label_max):
     label_max[:] = np.maximum(label_max, np.max(flattened_fields, axis=1))
 
 
-def yaml_float(value):
+def yaml_float(value: float | np.floating[Any]) -> str:
     if np.isfinite(value):
         return format(float(value), ".9g")
     return "null"
 
 
-def write_scaling_yaml(filename, input_min, input_max, label_min, label_max):
+def write_scaling_yaml(
+    filename: Path,
+    names: tuple[str, ...],
+    input_min: Float64Array,
+    input_max: Float64Array,
+    label_min: Float64Array,
+    label_max: Float64Array,
+) -> None:
     with open(filename, mode="w", encoding="utf-8") as scaling_file:
         scaling_file.write("inputs:\n")
-        for index, name in enumerate(INPUT_NAMES):
+        for index, name in enumerate(names):
             scaling_file.write(f"  {name}:\n")
             scaling_file.write(f"    min: {yaml_float(input_min[index])}\n")
             scaling_file.write(f"    max: {yaml_float(input_max[index])}\n")
@@ -296,13 +331,13 @@ def write_scaling_yaml(filename, input_min, input_max, label_min, label_max):
 
 
 def write_sample(
-    filename,
-    inputs,
-    fields,
-    inputs_scaled,
-    input_lower,
-    input_upper,
-):
+    filename: Path,
+    inputs: Float32Array,
+    fields: Float32Array,
+    inputs_scaled: BoolOrArray,
+    input_lower: Float64Array,
+    input_upper: Float64Array,
+) -> None:
     with h5py.File(filename, mode="w") as h5:
         inputs_dataset = h5.create_dataset("inputs", data=inputs.astype(np.float32), dtype="f")
         inputs_dataset.attrs["scaled_to_unit_range"] = inputs_scaled
@@ -318,19 +353,22 @@ def write_sample(
         )
 
 
-def write_png(filename, fields):
+def write_png(filename: Path, fields: Float32Array) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
 
-    z_index = fields.shape[3] // 2
     magnitude = np.sqrt(np.sum(fields * fields, axis=0))
-    center_slice = magnitude[:, :, z_index]
+    if fields.ndim == 4:
+        z_index = fields.shape[3] // 2
+        image_data = magnitude[:, :, z_index]
+    else:
+        image_data = magnitude
 
     fig, ax = plt.subplots()
     image = ax.imshow(
-        center_slice.T,
+        image_data.T,
         origin="lower",
         interpolation="none",
         aspect="equal",
@@ -343,7 +381,7 @@ def write_png(filename, fields):
     plt.close(fig)
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate HDF5 samples of far-field 3D seismic waves.")
     parser.add_argument("-n", "--nsamples", default=16, type=int)
     parser.add_argument("-o", "--output-dir", default="fault_seismic_3d_data")
@@ -365,8 +403,7 @@ def parse_args():
     parser.add_argument("--vp-max", default=6500.0, type=float)
     parser.add_argument("--vp-vs-min", default=1.65, type=float)
     parser.add_argument("--vp-vs-max", default=1.85, type=float)
-    parser.add_argument("--density-min", default=1800.0, type=float)
-    parser.add_argument("--density-max", default=3300.0, type=float)
+    parser.add_argument("--density", default=2500.0, type=float)
     parser.add_argument("--dip-min", default=float(np.deg2rad(5.0)), type=float)
     parser.add_argument("--dip-max", default=float(np.deg2rad(90.0)), type=float)
     parser.add_argument("--moment", default=1.0e13, type=float)
@@ -377,11 +414,12 @@ def parse_args():
         help="write each HDF5 inputs value min-max scaled to the unit range",
     )
     parser.add_argument("--write-png", action="store_true")
+    parser.add_argument("--split-z", action="store_true")
 
     return parser.parse_args()
 
 
-def validate_args(args):
+def validate_args(args: argparse.Namespace) -> None:
     if args.nx <= 1 or args.ny <= 1 or args.nz <= 1:
         raise ValueError("nx, ny, and nz must all be greater than 1")
     if args.nsamples < 0:
@@ -398,8 +436,8 @@ def validate_args(args):
         raise ValueError("vp bounds must satisfy 0 < vp-min < vp-max")
     if args.vp_vs_min <= 1.0 or args.vp_vs_max <= args.vp_vs_min:
         raise ValueError("vp/vs bounds must satisfy 1 < min < max")
-    if args.density_min <= 0.0 or args.density_max <= args.density_min:
-        raise ValueError("density bounds must satisfy 0 < min < max")
+    if args.density <= 0.0:
+        raise ValueError("density must be positive")
     if not (0.0 < args.dip_min < args.dip_max <= 0.5 * np.pi):
         raise ValueError("dip bounds must satisfy 0 < dip-min < dip-max <= pi/2")
     if args.source_duration <= 0.0:
@@ -412,7 +450,7 @@ def validate_args(args):
         raise ValueError("scaled inputs require t-max > t-min")
 
 
-def main():
+def main() -> None:
     args = parse_args()
     validate_args(args)
 
@@ -426,11 +464,16 @@ def main():
     times = np.arange(args.t_min, args.t_max + 0.5 * args.dt, args.dt)
     _, _, _, points = build_points(args.nx, args.ny, args.nz, args.domain_size)
     parameter_table = sample_parameter_table(args)
+    names = input_names(args.split_z)
     input_lower, input_upper = input_scaling_bounds(args, max(args.t_max, times[-1]))
-    local_input_min = np.full(len(INPUT_NAMES), np.inf, dtype=np.float64)
-    local_input_max = np.full(len(INPUT_NAMES), -np.inf, dtype=np.float64)
+    local_input_min = np.full(len(names), np.inf, dtype=np.float64)
+    local_input_max = np.full(len(names), -np.inf, dtype=np.float64)
     local_label_min = np.full(len(LABEL_NAMES), np.inf, dtype=np.float64)
     local_label_max = np.full(len(LABEL_NAMES), -np.inf, dtype=np.float64)
+    cases_per_sample = times.size
+    if args.split_z:
+        cases_per_sample *= args.nz
+    z_positions = np.linspace(0.0, 1.0, args.nz, dtype=np.float64)
 
     if rank == 0:
         print(args, flush=True)
@@ -438,8 +481,8 @@ def main():
             "Generating",
             args.nsamples,
             "realizations and",
-            args.nsamples * times.size,
-            "time-step cases on grid",
+            args.nsamples * cases_per_sample,
+            "cases on grid",
             (args.nx, args.ny, args.nz),
             "with",
             times.size,
@@ -459,8 +502,8 @@ def main():
         dip = params[4]
         rake = params[5]
         vp = params[6]
-        vs = params[7]
-        density = params[8]
+        vp_vs = params[7]
+        vs = vp / vp_vs
         fields_flat = far_field_displacement(
             points,
             times,
@@ -470,17 +513,17 @@ def main():
             rake,
             vp,
             vs,
-            density,
+            args.density,
             args.moment,
             args.source_duration,
             args.exclusion_radius,
         )
         fields_flat *= args.displacement_scale
+        clip_displacement_fields(fields_flat)
 
         for it, time_value in enumerate(times):
-            case = sample * times.size + it
             fields = fields_flat[it].reshape(3, args.nx, args.ny, args.nz)
-            inputs = np.array(
+            base_inputs = np.array(
                 [
                     source[0],
                     source[1],
@@ -489,35 +532,64 @@ def main():
                     dip,
                     rake,
                     vp,
-                    vs,
-                    density,
+                    vp_vs,
                     time_value,
                 ],
                 dtype=np.float64,
             )
-            if args.scale_inputs:
-                inputs = scale_inputs_to_unit_range(inputs, input_lower, input_upper)
-            inputs = inputs.astype(np.float32)
             threshold_fields_for_write(fields)
-            update_ranges(
-                inputs,
-                fields,
-                local_input_min,
-                local_input_max,
-                local_label_min,
-                local_label_max,
-            )
-            filename = output_dir / ("case" + str(case).zfill(8) + ".h5")
-            write_sample(
-                filename,
-                inputs,
-                fields,
-                args.scale_inputs,
-                input_lower,
-                input_upper,
-            )
-            if args.write_png:
-                write_png(filename.with_suffix(".png"), fields)
+            if args.split_z:
+                for iz, z_position in enumerate(z_positions):
+                    case = sample * cases_per_sample + it * args.nz + iz
+                    fields_slice = fields[:, :, :, iz]
+                    inputs = np.append(base_inputs, z_position)
+                    if args.scale_inputs:
+                        inputs = scale_inputs_to_unit_range(inputs, input_lower, input_upper)
+                    inputs = inputs.astype(np.float32)
+                    update_ranges(
+                        inputs,
+                        fields_slice,
+                        local_input_min,
+                        local_input_max,
+                        local_label_min,
+                        local_label_max,
+                    )
+                    filename = output_dir / ("case" + str(case).zfill(8) + ".h5")
+                    write_sample(
+                        filename,
+                        inputs,
+                        fields_slice,
+                        args.scale_inputs,
+                        input_lower,
+                        input_upper,
+                    )
+                    if args.write_png:
+                        write_png(filename.with_suffix(".png"), fields_slice)
+            else:
+                case = sample * cases_per_sample + it
+                inputs = base_inputs
+                if args.scale_inputs:
+                    inputs = scale_inputs_to_unit_range(inputs, input_lower, input_upper)
+                inputs = inputs.astype(np.float32)
+                update_ranges(
+                    inputs,
+                    fields,
+                    local_input_min,
+                    local_input_max,
+                    local_label_min,
+                    local_label_max,
+                )
+                filename = output_dir / ("case" + str(case).zfill(8) + ".h5")
+                write_sample(
+                    filename,
+                    inputs,
+                    fields,
+                    args.scale_inputs,
+                    input_lower,
+                    input_upper,
+                )
+                if args.write_png:
+                    write_png(filename.with_suffix(".png"), fields)
 
         if rank == 0:
             print(f"{sample}/{args.nsamples}", flush=True)
@@ -535,6 +607,7 @@ def main():
     if rank == 0:
         write_scaling_yaml(
             output_dir / "scaling.yaml",
+            names,
             global_input_min,
             global_input_max,
             global_label_min,
