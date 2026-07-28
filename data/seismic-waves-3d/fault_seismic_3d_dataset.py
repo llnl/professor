@@ -20,8 +20,8 @@ The displacement uses the far-field moment tensor approximation
     uS = (I - eR eR).M.eR * O(t - R / vs) / (4 pi rho vs^3 R)
 
 where O(t) is the moment-rate source time function.  Points very close to the
-source are outside the far-field regime and are left at zero by a configurable
-exclusion radius.
+source are outside the far-field regime, so radius values used in the amplitude
+estimate are clipped to a 25 m minimum.
 """
 
 import argparse
@@ -58,6 +58,8 @@ LABEL_NAMES = (
     "displacement_y",
     "displacement_z",
 )
+
+MIN_DISPLACEMENT_RADIUS = 25.0
 
 
 @njit(cache=True)
@@ -122,7 +124,6 @@ def far_field_displacement(
     density: float,
     moment: float,
     duration: float,
-    exclusion_radius: float,
 ) -> Float32Array:
     npoints = points.shape[0]
     nt = times.shape[0]
@@ -137,12 +138,16 @@ def far_field_displacement(
         ry = points[ip, 1] - source[1]
         rz = points[ip, 2] - source[2]
         radius = np.sqrt(rx * rx + ry * ry + rz * rz)
-        if radius <= exclusion_radius:
-            continue
+        estimate_radius = max(radius, MIN_DISPLACEMENT_RADIUS)
 
-        er0 = rx / radius
-        er1 = ry / radius
-        er2 = rz / radius
+        if radius > 0.0:
+            er0 = rx / radius
+            er1 = ry / radius
+            er2 = rz / radius
+        else:
+            er0 = 0.0
+            er1 = 0.0
+            er2 = 0.0
 
         mer0 = mt[0, 0] * er0 + mt[0, 1] * er1 + mt[0, 2] * er2
         mer1 = mt[1, 0] * er0 + mt[1, 1] * er1 + mt[1, 2] * er2
@@ -156,8 +161,8 @@ def far_field_displacement(
         s1 = mer1 - p1
         s2 = mer2 - p2
 
-        scale_p = inv_p / radius
-        scale_s = inv_s / radius
+        scale_p = inv_p / estimate_radius
+        scale_s = inv_s / estimate_radius
         tp = radius / vp
         ts = radius / vs
 
@@ -192,9 +197,8 @@ def sample_parameter_table(args: argparse.Namespace) -> Float64Array:
 
     sampler = qmc.LatinHypercube(d=8, seed=args.seed)
     unit = sampler.random(n=args.nsamples)
-    margin = args.source_margin
-    source_min = margin
-    source_max = args.domain_size - margin
+    source_min = 0.0
+    source_max = args.domain_size
 
     lower = np.array(
         [
@@ -234,9 +238,8 @@ def input_names(split_z: bool) -> tuple[str, ...]:
 
 
 def input_scaling_bounds(args: argparse.Namespace, time_upper: float) -> tuple[Float64Array, Float64Array]:
-    margin = args.source_margin
-    source_min = margin
-    source_max = args.domain_size - margin
+    source_min = 0.0
+    source_max = args.domain_size
 
     lower = np.array(
         [
@@ -391,8 +394,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-ny", "--ny", default=32, type=int)
     parser.add_argument("-nz", "--nz", default=32, type=int)
     parser.add_argument("--domain-size", default=1000.0, type=float)
-    parser.add_argument("--source-margin", default=50.0, type=float)
-    parser.add_argument("--exclusion-radius", default=25.0, type=float)
 
     parser.add_argument("--t-min", default=0.01, type=float)
     parser.add_argument("--t-max", default=0.20, type=float)
@@ -426,10 +427,6 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("nsamples must be non-negative")
     if args.domain_size <= 0.0:
         raise ValueError("domain-size must be positive")
-    if not (0.0 <= args.source_margin < 0.5 * args.domain_size):
-        raise ValueError("source-margin must be in [0, domain-size / 2)")
-    if args.exclusion_radius < 0.0:
-        raise ValueError("exclusion-radius must be non-negative")
     if args.dt <= 0.0 or args.t_max < args.t_min:
         raise ValueError("time settings must satisfy dt > 0 and t-max >= t-min")
     if args.vp_min <= 0.0 or args.vp_max <= args.vp_min:
@@ -516,7 +513,6 @@ def main() -> None:
             args.density,
             args.moment,
             args.source_duration,
-            args.exclusion_radius,
         )
         fields_flat *= args.displacement_scale
         clip_displacement_fields(fields_flat)
