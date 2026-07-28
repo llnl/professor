@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Professor - A Machine Learning Visualization Library"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "torch>=1.12.1",
     "torchvision",
