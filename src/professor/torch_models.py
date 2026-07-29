@@ -619,6 +619,7 @@ class Generator3DSpectral(nn.Module):
                 num_modes=(n_modes, n_modes, n_modes),
                 upscale_factor=2,
                 upscale_type=upscale_type,
+                bias=last_bias
             )
         )
 
@@ -709,7 +710,8 @@ class Generator3DVoxel(nn.Module):
                 kernel_size=upscale_kernel_size,
                 upscale_factor=2,
                 upscale_type='transpose',
-                separable_conv=False
+                separable_conv=False,
+                bias=last_bias
             )
         )
 

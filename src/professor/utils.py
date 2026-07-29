@@ -6,6 +6,49 @@ import torch
 from typing import Optional, Union, Dict, Any, Sequence
 
 
+class ZeroHeavyLoss(torch.nn.Module):
+    """
+    Weighted L1 loss for targets dominated by near-zero values.
+
+    Target pixels with ``abs(target) >= threshold`` are treated as signal and
+    receive ``nonzero_weight`` times the weight of near-zero pixels. The mean
+    reduction divides by the total weight to keep loss scale stable across
+    batches with different sparsity.
+    """
+
+    def __init__(
+        self,
+        threshold: float = 1e-4,
+        nonzero_weight: float = 100.0,
+        reduction: str = "mean",
+    ) -> None:
+        super().__init__()
+        if threshold < 0.0:
+            raise ValueError("threshold must be non-negative")
+        if nonzero_weight < 1.0:
+            raise ValueError("nonzero_weight must be at least 1.0")
+        if reduction not in {"mean", "sum", "none"}:
+            raise ValueError("reduction must be 'mean', 'sum', or 'none'")
+
+        self.threshold = threshold
+        self.nonzero_weight = nonzero_weight
+        self.reduction = reduction
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        abs_error = torch.abs(pred - target)
+        signal_mask = torch.abs(target) >= self.threshold
+        signal_weight = torch.full_like(abs_error, self.nonzero_weight)
+        weights = torch.where(signal_mask, signal_weight, torch.ones_like(abs_error))
+        weighted_error = weights * abs_error
+
+        if self.reduction == "none":
+            return weighted_error
+        if self.reduction == "sum":
+            return torch.sum(weighted_error)
+
+        return torch.sum(weighted_error) / torch.sum(weights).clamp_min(torch.finfo(weights.dtype).eps)
+
+
 def consolidated_loss(
     pred: torch.Tensor,
     target: torch.Tensor,

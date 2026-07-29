@@ -9,7 +9,6 @@ from professor import utils
 
 
 class TestConsolidatedLoss(unittest.TestCase):
-
     # Create random tensors for testing
     torch.manual_seed(42)  # For reproducibility
     pred = torch.rand(10, 5)
@@ -176,6 +175,44 @@ class TestConsolidatedLoss(unittest.TestCase):
             torch.allclose(weighted_sum, manual_weighted_sum),
             f"Weighted sum mismatch: Function = {weighted_sum}, Manual = {manual_weighted_sum}",
         )
+
+
+class TestZeroHeavyLoss(unittest.TestCase):
+    def test_weights_positive_and_negative_signal_pixels(self):
+        pred = torch.tensor([0.0, 0.0, 0.0, 0.0])
+        target = torch.tensor([0.0, 5e-5, 2.0, -3.0])
+        loss = utils.ZeroHeavyLoss(threshold=1e-4, nonzero_weight=10.0)
+
+        actual = loss(pred, target)
+        weighted_error = torch.tensor([0.0, 5e-5, 20.0, 30.0])
+        expected = torch.sum(weighted_error) / torch.tensor(22.0)
+
+        self.assertTrue(
+            torch.allclose(actual, expected),
+            f"Zero-heavy loss mismatch: Function = {actual}, Manual = {expected}",
+        )
+
+    def test_nonzero_signal_has_larger_gradient(self):
+        pred = torch.tensor([0.0, 0.0], requires_grad=True)
+        target = torch.tensor([0.0, 1.0])
+        loss = utils.ZeroHeavyLoss(threshold=1e-4, nonzero_weight=10.0)
+
+        actual = loss(pred, target)
+        actual.backward()
+
+        self.assertEqual(pred.grad[0].item(), 0.0)
+        self.assertLess(pred.grad[1].item(), 0.0)
+        self.assertTrue(torch.allclose(pred.grad[1], torch.tensor(-10.0 / 11.0)))
+
+    def test_sum_and_none_reductions(self):
+        pred = torch.tensor([1.0, 1.0])
+        target = torch.tensor([0.0, -2.0])
+
+        sum_loss = utils.ZeroHeavyLoss(threshold=1e-4, nonzero_weight=5.0, reduction="sum")
+        none_loss = utils.ZeroHeavyLoss(threshold=1e-4, nonzero_weight=5.0, reduction="none")
+
+        self.assertTrue(torch.allclose(sum_loss(pred, target), torch.tensor(16.0)))
+        self.assertTrue(torch.allclose(none_loss(pred, target), torch.tensor([1.0, 15.0])))
 
 
 if __name__ == "__main__":
