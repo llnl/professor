@@ -424,7 +424,7 @@ def main(args: argparse.Namespace) -> None:
         x_kernel=args.x_kernel,
         y_kernel=args.y_kernel,
         z_kernel=args.z_kernel,
-        act_fun=args.act_run,
+        act_fun=args.act_fun,
         upscale_type=args.upscale_type,
     )
 
