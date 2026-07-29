@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.profiler import profile, record_function, ProfilerActivity
 import professor
-from professor.utils import ZeroHeavyLoss, consolidated_loss
+from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
 from professor.torch_models import build_generator
 from professor.vela.config import build_template_config, update_config_checkpoint
@@ -411,8 +411,7 @@ def main(args: argparse.Namespace) -> None:
     finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
 
     # Select generator strategy
-    # Note: act_fun, use_batch_norm, and last_bias are not wired into
-    # the user argument parser
+    # Note: use_batch_norm and last_bias are not wired into the user argument parser
     model = build_generator(
         args.generator_type,
         input_size=n_input,
@@ -425,6 +424,7 @@ def main(args: argparse.Namespace) -> None:
         x_kernel=args.x_kernel,
         y_kernel=args.y_kernel,
         z_kernel=args.z_kernel,
+        act_fun=args.act_run,
         upscale_type=args.upscale_type,
     )
 
@@ -523,19 +523,18 @@ def main(args: argparse.Namespace) -> None:
             input_parameters=model_params,
             fields=keys,
             generator_type=args.generator_type,
+            act_fun=act_fun,
         )
 
     # try to free up gpu memory
     torch.cuda.empty_cache()
 
+    MAE = torch.nn.L1Loss()
+    MSE = torch.nn.MSELoss()
     if loss_target == "l1":
-        MyLoss = torch.nn.L1Loss()
-    elif loss_target == "l2":
-        MyLoss = torch.nn.MSELoss()
-    elif loss_target == "zero_heavy":
-        MyLoss = ZeroHeavyLoss()
+        MyLoss = MAE
     else:
-        raise ValueError("loss_target must be 'l1', 'l2', or 'zero_heavy'")
+        MyLoss = MSE
 
     def progress(x: Any):
         if rank == 0:

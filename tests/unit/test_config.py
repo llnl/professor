@@ -3,21 +3,38 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import pytest
+from omegaconf import OmegaConf
 from schema import SchemaError, SchemaMissingKeyError, SchemaWrongKeyError
+
 from professor.vela.config import (
     AppearanceSchema,
     # CheckpointsSchema,
+    DimensionsSchema,
     ExecutionSchema,
     FieldsSchema,
     FullSchema,
     GUISchema,
-    Keys,
-    DimensionsSchema,
     InvocationSchema,
+    Keys,
     ModelSchema,
     PluginsSchema,
     SlidersSchema,
+    build_template_config,
 )
+
+
+def test_build_template_config_sets_act_fun(tmp_path):
+    config_path = tmp_path / "template_config.yaml"
+
+    build_template_config(
+        config_fname=str(config_path),
+        checkpoint_path="0000.pt",
+        act_fun="LeakyReLU",
+    )
+
+    conf = FullSchema(OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)).val
+    params = conf[Keys.MODEL.value][Keys.PYTORCH.value][Keys.INVOCATION.value][Keys.PARAMS.value]
+    assert params["act_fun"] == "LeakyReLU"
 
 
 # class TestCheckpointSchema:

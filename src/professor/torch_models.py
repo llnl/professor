@@ -12,6 +12,20 @@ from typing import cast, Dict, Iterable
 from professor.layers import UpscaleBlock2D, UpscaleBlock3D, UpscaleBlock3DSpectral
 
 
+GENERATOR_ACTIVATION_FUNCTIONS = (
+    "ReLU",
+    "Tanh",
+    "Softplus",
+    "SoftSign",
+    "Mish",
+    "SiLU",
+    "GELU",
+    "CELU",
+    "LeakyReLU",
+    "ELU",
+)
+
+
 class RB(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.exp(-torch.square(x))
@@ -53,6 +67,9 @@ def build_activation(activation_name: str) -> nn.Module:
     """
     Build an instance of an activation layer by name
     """
+    if activation_name == "SoftSign":
+        activation_name = "Softsign"
+
     activation_type = getattr(nn, activation_name)
     if activation_type is None:
         raise Exception(f"Could not find target activation function: {activation_name}")

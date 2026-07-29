@@ -651,6 +651,7 @@ def build_template_config(
     y_kernel: int = 4,
     z_kernel: int = 0,
     generator_type: str = "legacy",
+    act_fun: str = "ReLU",
     upscale_type: str = "transpose",
     fields: list[str] = ["field"],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
@@ -691,6 +692,7 @@ def build_template_config(
     params["max_features"] = max_features
     params["x_kernel"] = x_kernel
     params["y_kernel"] = y_kernel
+    params["act_fun"] = act_fun
 
     if z_kernel:
         params["z_kernel"] = z_kernel

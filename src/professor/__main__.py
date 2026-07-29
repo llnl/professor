@@ -2,8 +2,10 @@
 # contributors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-import professor
 import argparse
+
+import professor
+from professor.torch_models import GENERATOR_ACTIVATION_FUNCTIONS
 
 
 def prof_trainer() -> None:
@@ -127,6 +129,13 @@ def prof_trainer() -> None:
         type=str,
         default="legacy",
         help="Generator type (legacy, 2D, 3D-triplane, 3D-spectral, 3D-voxel)",
+    )
+    parser.add_argument(
+        "--act-fun",
+        type=str,
+        default="ReLU",
+        choices=GENERATOR_ACTIVATION_FUNCTIONS,
+        help="Activation function to use in the generator.",
     )
     parser.add_argument(
         "--dataloader_workers",
