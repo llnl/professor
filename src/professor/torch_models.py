@@ -12,19 +12,6 @@ from typing import cast, Dict, Iterable
 from professor.layers import UpscaleBlock2D, UpscaleBlock3D, UpscaleBlock3DSpectral
 
 
-GENERATOR_ACTIVATION_FUNCTIONS = (
-    "ReLU",
-    "Tanh",
-    "Softplus",
-    "SoftSign",
-    "Mish",
-    "SiLU",
-    "GELU",
-    "CELU",
-    "LeakyReLU",
-    "ELU",
-)
-
 
 class RB(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:

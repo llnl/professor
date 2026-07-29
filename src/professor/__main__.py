@@ -3,9 +3,21 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import argparse
-
 import professor
-from professor.torch_models import GENERATOR_ACTIVATION_FUNCTIONS
+
+
+GENERATOR_ACTIVATION_FUNCTIONS = (
+    "ReLU",
+    "Tanh",
+    "Softplus",
+    "SoftSign",
+    "Mish",
+    "SiLU",
+    "GELU",
+    "CELU",
+    "LeakyReLU",
+    "ELU",
+)
 
 
 def prof_trainer() -> None:
