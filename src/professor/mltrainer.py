@@ -523,7 +523,7 @@ def main(args: argparse.Namespace) -> None:
             input_parameters=model_params,
             fields=keys,
             generator_type=args.generator_type,
-            act_fun=act_fun,
+            act_fun=args.act_fun,
         )
 
     # try to free up gpu memory
