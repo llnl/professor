@@ -191,6 +191,8 @@ def write_sample(
             "fields",
             data=field[None, ...],
             dtype="float32",
+            compression='lzf',
+            shuffle=True
         )
 
 
