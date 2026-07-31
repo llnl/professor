@@ -216,13 +216,13 @@ class UpscaleBlock2D(nn.Module):
 
         # Build the upsampler
         self.skip: nn.Module | None = None
-        if upscale_type in ["bilinear", "nearest"]:
+        if upscale_type not in ["bilinear", "nearest", "transpose"]:
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+        if self._residual and upscale_type in ["bilinear", "nearest"]:
             self.skip = nn.Sequential(
                 nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
                 nn.Conv2d(in_channels, out_channels, 1, stride=1, padding="same", bias=False),
             )
-        elif upscale_type != "transpose":
-            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
 
         self.main: nn.Module
         if conv_upscale:
@@ -295,13 +295,13 @@ class UpscaleBlock3D(nn.Module):
 
         # Build the upsampler
         self.skip: nn.Module | None = None
-        if upscale_type in ["trilinear", "nearest"]:
+        if upscale_type not in ["trilinear", "nearest", "transpose"]:
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+        if self._residual and upscale_type in ["trilinear", "nearest"]:
             self.skip = nn.Sequential(
                 nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
                 nn.Conv3d(in_features, out_features, 1, stride=1, padding="same", bias=False),
             )
-        elif upscale_type != "transpose":
-            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
 
         # Build the main path
         layers = []
@@ -417,13 +417,13 @@ class UpscaleBlock3DSpectral(nn.Module):
 
         # Build the upsampler
         self.skip: nn.Module | None = None
-        if upscale_type in ["trilinear", "nearest"]:
+        if upscale_type not in ["trilinear", "nearest", "transpose"]:
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+        if self._residual and upscale_type in ["trilinear", "nearest"]:
             self.skip = nn.Sequential(
                 nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
                 nn.Conv3d(in_features, out_features, 1, stride=1, padding="same", bias=False),
             )
-        elif upscale_type != "transpose":
-            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
 
         self.main: nn.Module
         if conv_upscale:
