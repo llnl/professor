@@ -713,7 +713,7 @@ class Generator3DVoxel(nn.Module):
                 num_channels,
                 kernel_size=upscale_kernel_size,
                 upscale_factor=2,
-                upscale_type='transpose',
+                upscale_type=upscale_type,
                 separable_conv=False,
                 bias=last_bias
             )
