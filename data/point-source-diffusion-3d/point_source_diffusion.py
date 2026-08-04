@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from typing import Optional, Tuple
 
 import h5py
 import numpy as np
@@ -11,20 +10,15 @@ from mpi4py import MPI
 from numpy.typing import NDArray
 from scipy.stats import qmc
 
-
 FloatArray = NDArray[np.float32]
 Float64Array = NDArray[np.float64]
-Grid = Tuple[FloatArray, FloatArray, FloatArray]
+Grid = tuple[FloatArray, FloatArray, FloatArray]
 SourcePositions = NDArray[np.float32]
+ParameterRange = tuple[str, float, float]
 
 
 def generate_field(
-    source_positions: SourcePositions,
-    source_strengths: FloatArray,
-    diffusivity: float,
-    time: float,
-    grid: Grid,
-    normalize: bool = True,
+    source_positions: SourcePositions, source_strengths: FloatArray, diffusivity: float, time: float, grid: Grid
 ) -> FloatArray:
     if diffusivity <= 0:
         raise ValueError("diffusivity must be positive")
@@ -33,30 +27,13 @@ def generate_field(
 
     x, y, z = grid
     field = np.zeros_like(x, dtype=np.float64)
-
     denominator = 4.0 * diffusivity * time
     prefactor = denominator ** (-1.5)
 
     for position, strength in zip(source_positions, source_strengths):
         sx, sy, sz = position
-
-        radius_squared = (
-            (x - sx) ** 2
-            + (y - sy) ** 2
-            + (z - sz) ** 2
-        )
-
-        field += strength * prefactor * np.exp(
-            -radius_squared / denominator
-        )
-
-    if normalize:
-        total_strength = float(np.sum(source_strengths))
-
-        if total_strength <= 0:
-            raise ValueError("total source strength must be positive")
-
-        field /= total_strength
+        radius_squared = (x - sx) ** 2 + (y - sy) ** 2 + (z - sz) ** 2
+        field += strength * prefactor * np.exp(-radius_squared / denominator)
 
     return field.astype(np.float32)
 
@@ -82,7 +59,7 @@ def make_grid(
 def sample_parameter_distribution(
     num_samples: int,
     num_sources: int,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     domain_min: float = 0.1,
     domain_max: float = 0.9,
     diffusivity_min: float = 0.05,
@@ -91,7 +68,7 @@ def sample_parameter_distribution(
     vary_strengths: bool = False,
     strength_min: float = 0.5,
     strength_max: float = 1.5,
-) -> Tuple[FloatArray, float]:
+) -> tuple[FloatArray, float]:
     if num_samples < 1:
         raise ValueError("num_samples must be positive")
     if num_sources < 1:
@@ -102,6 +79,8 @@ def sample_parameter_distribution(
         raise ValueError("invalid diffusivity range")
     if time <= 0:
         raise ValueError("time must be positive")
+    if vary_strengths and strength_min >= strength_max:
+        raise ValueError("strength_min must be less than strength_max")
 
     dimensions = 3 * num_sources + 1
 
@@ -118,41 +97,21 @@ def sample_parameter_distribution(
 
     column = 0
 
-    for _ in range(num_sources):
-        parameters[:, column] = (
-            domain_min
-            + unit_samples[:, column]
-            * (domain_max - domain_min)
-        )
-        column += 1
-
-        parameters[:, column] = (
-            domain_min
-            + unit_samples[:, column]
-            * (domain_max - domain_min)
-        )
-        column += 1
-
-        parameters[:, column] = (
-            domain_min
-            + unit_samples[:, column]
-            * (domain_max - domain_min)
-        )
-        column += 1
-
-    parameters[:, column] = (
-        diffusivity_min
-        + unit_samples[:, column]
-        * (diffusivity_max - diffusivity_min)
-    )
+    parameters[:, column] = diffusivity_min + unit_samples[:, column] * (diffusivity_max - diffusivity_min)
     column += 1
 
+    for _ in range(num_sources):
+        parameters[:, column] = domain_min + unit_samples[:, column] * (domain_max - domain_min)
+        column += 1
+
+        parameters[:, column] = domain_min + unit_samples[:, column] * (domain_max - domain_min)
+        column += 1
+
+        parameters[:, column] = domain_min + unit_samples[:, column] * (domain_max - domain_min)
+        column += 1
+
     if vary_strengths:
-        parameters[:, column:] = (
-            strength_min
-            + unit_samples[:, column:]
-            * (strength_max - strength_min)
-        )
+        parameters[:, column:] = strength_min + unit_samples[:, column:] * (strength_max - strength_min)
 
     return parameters, time
 
@@ -161,16 +120,16 @@ def unpack_parameters(
     parameters: FloatArray,
     num_sources: int,
     time: float,
-) -> Tuple[SourcePositions, FloatArray, float, float]:
+) -> tuple[SourcePositions, FloatArray, float, float]:
     position_count = 3 * num_sources
 
-    positions = parameters[:position_count].reshape(
+    diffusivity = float(parameters[0])
+    positions = parameters[1 : 1 + position_count].reshape(
         num_sources,
         3,
     )
 
-    diffusivity = float(parameters[position_count])
-    strengths_start = position_count + 1
+    strengths_start = 1 + position_count
 
     if parameters.size > strengths_start:
         strengths = parameters[strengths_start:]
@@ -180,6 +139,102 @@ def unpack_parameters(
     return positions, strengths, diffusivity, time
 
 
+def build_parameter_ranges(
+    num_sources: int,
+    domain_min: float,
+    domain_max: float,
+    diffusivity_min: float,
+    diffusivity_max: float,
+    vary_strengths: bool,
+    strength_min: float,
+    strength_max: float,
+) -> tuple[ParameterRange, ...]:
+    parameter_ranges: list[ParameterRange] = [
+        ("diffusivity", diffusivity_min, diffusivity_max),
+    ]
+
+    for source_index in range(num_sources):
+        prefix = f"source_{source_index}"
+        parameter_ranges.extend(
+            (
+                (f"{prefix}_x", domain_min, domain_max),
+                (f"{prefix}_y", domain_min, domain_max),
+                (f"{prefix}_z", domain_min, domain_max),
+            )
+        )
+
+    if vary_strengths:
+        for source_index in range(num_sources):
+            parameter_ranges.append(
+                (
+                    f"source_{source_index}_strength",
+                    strength_min,
+                    strength_max,
+                )
+            )
+
+    return tuple(parameter_ranges)
+
+
+def normalize_parameters(
+    parameters: FloatArray,
+    parameter_ranges: tuple[ParameterRange, ...],
+) -> FloatArray:
+    lower = np.array(
+        [parameter_min for _, parameter_min, _ in parameter_ranges],
+        dtype=np.float32,
+    )
+    upper = np.array(
+        [parameter_max for _, _, parameter_max in parameter_ranges],
+        dtype=np.float32,
+    )
+    widths = upper - lower
+
+    if np.any(widths <= 0.0):
+        raise ValueError("parameter ranges must have positive width")
+
+    return ((parameters - lower) / widths).astype(np.float32)
+
+
+def measure_parameter_ranges(
+    parameters: FloatArray,
+    parameter_ranges: tuple[ParameterRange, ...],
+) -> tuple[ParameterRange, ...]:
+    measured_ranges: list[ParameterRange] = []
+
+    for index, (name, _, _) in enumerate(parameter_ranges):
+        measured_ranges.append(
+            (
+                name,
+                float(np.min(parameters[:, index])),
+                float(np.max(parameters[:, index])),
+            )
+        )
+
+    return tuple(measured_ranges)
+
+
+def yaml_float(value: float | np.floating) -> str:
+    if np.isfinite(value):
+        return format(float(value), ".9g")
+    return "null"
+
+
+def write_parameter_ranges_yaml(
+    filename: Path,
+    parameter_ranges: tuple[ParameterRange, ...],
+    normalized: bool,
+) -> None:
+    with open(filename, mode="w", encoding="utf-8") as ranges_file:
+        ranges_file.write(f"normalized: {str(normalized).lower()}\n")
+        ranges_file.write("parameters:\n")
+
+        for name, parameter_min, parameter_max in parameter_ranges:
+            ranges_file.write(f"  {name}:\n")
+            ranges_file.write(f"    min: {yaml_float(parameter_min)}\n")
+            ranges_file.write(f"    max: {yaml_float(parameter_max)}\n")
+
+
 def write_sample(
     filename: Path,
     parameters: FloatArray,
@@ -187,13 +242,7 @@ def write_sample(
 ) -> None:
     with h5py.File(filename, "w") as output:
         output.create_dataset("inputs", data=parameters)
-        output.create_dataset(
-            "fields",
-            data=field[None, ...],
-            dtype="float32",
-            compression='lzf',
-            shuffle=True
-        )
+        output.create_dataset("fields", data=field[None, ...], dtype="float32", compression="lzf", shuffle=True)
 
 
 def write_sample_png(
@@ -273,14 +322,42 @@ def generate_samples(args: argparse.Namespace) -> None:
             strength_min=args.strength_min,
             strength_max=args.strength_max,
         )
+        parameter_ranges = build_parameter_ranges(
+            num_sources=args.num_sources,
+            domain_min=args.source_min,
+            domain_max=args.source_max,
+            diffusivity_min=args.diffusivity_min,
+            diffusivity_max=args.diffusivity_max,
+            vary_strengths=args.vary_strengths,
+            strength_min=args.strength_min,
+            strength_max=args.strength_max,
+        )
+
+        output_parameters = parameters
+        if args.normalize_parameters:
+            output_parameters = normalize_parameters(
+                parameters,
+                parameter_ranges,
+            )
+
+        write_parameter_ranges_yaml(
+            filename=output_dir / "parameter_ranges.yaml",
+            parameter_ranges=measure_parameter_ranges(
+                output_parameters,
+                parameter_ranges,
+            ),
+            normalized=args.normalize_parameters,
+        )
     else:
         parameters = None
+        output_parameters = None
         time = None
 
     parameters = comm.bcast(parameters, root=0)
+    output_parameters = comm.bcast(output_parameters, root=0)
     time = comm.bcast(time, root=0)
 
-    if parameters is None or time is None:
+    if parameters is None or output_parameters is None or time is None:
         raise RuntimeError("Failed to broadcast parameters")
 
     grid = make_grid(args.resolution)
@@ -291,36 +368,27 @@ def generate_samples(args: argparse.Namespace) -> None:
     )[rank]
 
     if rank == 0:
-        print(
-            f"Generating {args.num_samples} samples "
-            f"with {args.num_sources} source(s)"
-        )
+        print(f"Generating {args.num_samples} samples with {args.num_sources} source(s)")
 
     for global_index in local_indices:
         sample_parameters = parameters[global_index]
+        sample_output_parameters = output_parameters[global_index]
 
-        positions, strengths, diffusivity, sample_time = (
-            unpack_parameters(
-                sample_parameters,
-                args.num_sources,
-                time,
-            )
+        positions, strengths, diffusivity, sample_time = unpack_parameters(
+            sample_parameters,
+            args.num_sources,
+            time,
         )
 
         field = generate_field(
-            source_positions=positions,
-            source_strengths=strengths,
-            diffusivity=diffusivity,
-            time=sample_time,
-            grid=grid,
-            normalize=not args.no_normalization,
+            source_positions=positions, source_strengths=strengths, diffusivity=diffusivity, time=sample_time, grid=grid
         )
 
         filename = output_dir / f"image_{global_index:06d}.h5"
 
         write_sample(
             filename=filename,
-            parameters=sample_parameters,
+            parameters=sample_output_parameters,
             field=field,
         )
 
@@ -338,9 +406,7 @@ def generate_samples(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Generate analytical 3D multi-source diffusion fields."
-    )
+    parser = argparse.ArgumentParser(description="Generate analytical 3D multi-source diffusion fields.")
 
     parser.add_argument(
         "-r",
@@ -424,9 +490,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum source strength",
     )
     parser.add_argument(
-        "--no-normalization",
+        "--normalize-parameters",
         action="store_true",
-        help="Keep physical amplitude instead of normalizing",
+        help="Scale written parameters to the [0, 1] range",
     )
     parser.add_argument(
         "--write-png",
