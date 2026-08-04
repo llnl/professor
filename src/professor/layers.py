@@ -272,7 +272,7 @@ class UpscaleBlock3D(nn.Module):
         bias: bool = False,
         batch_norm: bool = True,
         upscale_type: str = "transpose",
-        separable_conv: bool = True,
+        separable_conv: bool = False,
         activation_function: nn.Module | None = None,
     ):
         super().__init__()

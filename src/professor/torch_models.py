@@ -311,6 +311,7 @@ class Generator2D(nn.Module):
                 bias=last_bias,
                 batch_norm=False,
                 upscale_type=upscale_type,
+                residual=False
             )
         )
         layers.append(last_layer)
@@ -439,6 +440,7 @@ class Generator3DTriplane(nn.Module):
         x_kernel: int = 4,
         z_kernel: int = 4,
         upscale_type: str = "nearest",
+        residual: bool = False,
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
@@ -465,7 +467,7 @@ class Generator3DTriplane(nn.Module):
             upscale_type=upscale_type,
             act_fun=act_fun,
             last_bias=last_bias,
-            residual=True
+            residual=residual
         )
         self.generator_y: Generator2D = Generator2D(
             input_size,
@@ -480,7 +482,7 @@ class Generator3DTriplane(nn.Module):
             upscale_type=upscale_type,
             act_fun=act_fun,
             last_bias=last_bias,
-            residual=True
+            residual=residual
         )
         self.generator_z: Generator2D = Generator2D(
             input_size,
@@ -495,7 +497,7 @@ class Generator3DTriplane(nn.Module):
             upscale_type=upscale_type,
             act_fun=act_fun,
             last_bias=last_bias,
-            residual=True
+            residual=residual
         )
 
         self.reconstruction_layers = nn.Sequential(
@@ -543,6 +545,7 @@ class Generator3DSpectral(nn.Module):
         x_kernel: int = 4,
         n_modes: int = 8,
         upscale_type: str = "nearest",
+        residual: bool = False,
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
@@ -598,7 +601,7 @@ class Generator3DSpectral(nn.Module):
                         batch_norm=self.use_batch_norm,
                         upscale_type=upscale_type,
                         activation_function=build_activation(act_fun),
-                        residual=True
+                        residual=residual
                     )
                 )
             else:
@@ -611,7 +614,7 @@ class Generator3DSpectral(nn.Module):
                         batch_norm=self.use_batch_norm,
                         upscale_type=upscale_type,
                         activation_function=build_activation(act_fun),
-                        residual=True
+                        residual=residual
                     )
                 )
 
@@ -623,7 +626,8 @@ class Generator3DSpectral(nn.Module):
                 num_modes=(n_modes, n_modes, n_modes),
                 upscale_factor=2,
                 upscale_type=upscale_type,
-                bias=last_bias
+                bias=last_bias,
+                residual=False
             )
         )
 
@@ -650,6 +654,7 @@ class Generator3DVoxel(nn.Module):
         y_kernel: int = 4,
         x_kernel: int = 4,
         upscale_type: str = "nearest",
+        residual: bool = False,
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
@@ -670,10 +675,6 @@ class Generator3DVoxel(nn.Module):
 
         # Build first layers
         layers: list[nn.Module] = [self.first_layer]
-        # Use seperable convlolutions for the first layers to limit the total mult-ads
-        # reshape_layers: list[nn.Module] = [
-        #     nn.ConvTranspose3d(input_size, out_features, layer_size, 1, 0, bias=False)
-        # ]
         reshape_features = min(out_features, 3 * input_size)
         reshape_layers: list[nn.Module] = [
             nn.ConvTranspose3d(input_size, reshape_features, (x_kernel, 1, 1), 1, 0, bias=False),
@@ -702,7 +703,8 @@ class Generator3DVoxel(nn.Module):
                     batch_norm=self.use_batch_norm,
                     upscale_type=upscale_type,
                     activation_function=build_activation(act_fun),
-                    residual=True
+                    residual=residual,
+                    separable_conv=True
                 )
             )
 
@@ -714,6 +716,7 @@ class Generator3DVoxel(nn.Module):
                 kernel_size=upscale_kernel_size,
                 upscale_factor=2,
                 upscale_type=upscale_type,
+                residual=False,
                 separable_conv=False,
                 bias=last_bias
             )
