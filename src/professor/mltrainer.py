@@ -524,6 +524,7 @@ def main(args: argparse.Namespace) -> None:
             fields=keys,
             generator_type=args.generator_type,
             act_fun=args.act_fun,
+            upscale_type=args.upscale_type
         )
 
     # try to free up gpu memory

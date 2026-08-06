@@ -501,7 +501,7 @@ class Generator3DTriplane(nn.Module):
         )
 
         self.reconstruction_layers = nn.Sequential(
-            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=3 * intermediate_channels, kernel_size=1),
+            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=3 * intermediate_channels, kernel_size=(3, 3, 3), padding='same'),
             nn.BatchNorm3d(3 * intermediate_channels),
             build_activation(act_fun),
             nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=num_channels, kernel_size=1),
