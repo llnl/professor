@@ -675,12 +675,11 @@ class Generator3DVoxel(nn.Module):
 
         # Build first layers
         layers: list[nn.Module] = [self.first_layer]
-        reshape_features = min(out_features, 3 * input_size)
+
+        # Note: Swap the normal order of the separable conv for the first layer to add more complexity
         reshape_layers: list[nn.Module] = [
-            nn.ConvTranspose3d(input_size, reshape_features, (x_kernel, 1, 1), 1, 0, bias=False),
-            nn.ConvTranspose3d(reshape_features, reshape_features, (1, y_kernel, 1), 1, 0, bias=False),
-            nn.ConvTranspose3d(reshape_features, reshape_features, (1, 1, z_kernel), 1, 0, bias=False),
-            nn.ConvTranspose3d(reshape_features, out_features, (1, 1, 1), 1, 0, bias=False)
+            nn.Conv3d(input_size, out_features, kernel_size=1, stride=1, padding='same', bias=False),
+            nn.ConvTranspose3d(out_features, out_features, (x_kernel, y_kernel, z_kernel), stride=1, padding=0, bias=False, groups=out_features)
         ]
         if use_batch_norm:
             reshape_layers.append(nn.BatchNorm3d(out_features))
