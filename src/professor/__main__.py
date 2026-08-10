@@ -21,6 +21,12 @@ def prof_trainer() -> None:
         help="Mini-batch size on each GPU",
     )
     parser.add_argument(
+        "--batch_multiplier",
+        default=1,
+        type=int,
+        help="Number of mini-batches to accumulate before updating model weights.",
+    )
+    parser.add_argument(
         "--lr",
         default=1e-3,
         type=float,
