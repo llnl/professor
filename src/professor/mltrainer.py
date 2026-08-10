@@ -440,6 +440,7 @@ def main(args: argparse.Namespace) -> None:
         batch_size=batch_size,
         sampler=train_sampler,
         num_workers=args.dataloader_workers,
+        multiprocessing_context="spawn",
         prefetch_factor=1,
     )
 
