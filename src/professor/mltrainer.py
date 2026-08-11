@@ -26,6 +26,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from time import time, sleep
 from torchinfo import summary
+from tqdm import tqdm
 from typing import cast, Tuple, Any
 
 
@@ -533,6 +534,12 @@ def main(args: argparse.Namespace) -> None:
         MyLoss = MAE
     else:
         MyLoss = MSE
+
+    def progress(x: Any):
+        if rank == 0:
+            return tqdm(x, desc='Batch progress')
+        else:
+            return x
 
     n_train_loader = len(train_loader)
     n_train_data = size * batch_size * n_train_loader * n_channels * n_pixels_y * n_pixels_x  # noqa E:501

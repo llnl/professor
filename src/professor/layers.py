@@ -236,6 +236,7 @@ class UpscaleBlock3D(nn.Module):
         bias: bool = False,
         batch_norm: bool = True,
         upscale_type: str = "transpose",
+        separable_conv: bool = True,
         activation_function: nn.Module | None = None,
     ):
         super(UpscaleBlock3D, self).__init__()
@@ -243,9 +244,20 @@ class UpscaleBlock3D(nn.Module):
         layers = []
         if upscale_type == "transpose":
             padding = (kernel_size - upscale_factor) // 2
-            layers.append(
-                nn.ConvTranspose3d(in_features, out_features, kernel_size, upscale_factor, padding, bias=bias)
-            )
+            if separable_conv:
+                layers.append(
+                    nn.ConvTranspose3d(in_features, out_features, (kernel_size, 1, 1), (upscale_factor, 1, 1), (padding, 0, 0), bias=bias)
+                )
+                layers.append(
+                    nn.ConvTranspose3d(out_features, out_features, (1, kernel_size, 1), (1, upscale_factor, 1), (0, padding, 0), bias=bias)
+                )
+                layers.append(
+                    nn.ConvTranspose3d(out_features, out_features, (1, 1, kernel_size), (1, 1, upscale_factor), (0, 0, padding), bias=bias)
+                )
+            else:
+                layers.append(
+                    nn.ConvTranspose3d(in_features, out_features, kernel_size, upscale_factor, padding, bias=bias)
+                )
 
         elif upscale_type in ["linear", "nearest"]:
             interp_kwargs = {}
@@ -254,7 +266,12 @@ class UpscaleBlock3D(nn.Module):
                 interp_kwargs["align_corners"] = True
 
             layers.append(nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs))
-            layers.append(nn.Conv3d(in_features, out_features, kernel_size, stride=1, padding="same", bias=bias))
+            if separable_conv:
+                layers.append(nn.Conv3d(in_features, in_features, (kernel_size, 1, 1), stride=1, padding="same", bias=bias))
+                layers.append(nn.Conv3d(in_features, in_features, (1, kernel_size, 1), stride=1, padding="same", bias=bias))
+                layers.append(nn.Conv3d(in_features, out_features, (1, 1, kernel_size), stride=1, padding="same", bias=bias))
+            else:
+                layers.append(nn.Conv3d(in_features, out_features, kernel_size, stride=1, padding="same", bias=bias))
         else:
             raise Exception(f"Unrecognized layer upscale type: {upscale_type}")
 

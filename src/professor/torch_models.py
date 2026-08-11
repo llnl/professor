@@ -554,7 +554,17 @@ class Generator3DSpectral(nn.Module):
 
         # Build first layers
         layers: list[nn.Module] = [self.first_layer]
-        reshape_layers: list[nn.Module] = [nn.ConvTranspose3d(input_size, out_features, layer_size, 1, 0, bias=False)]
+        # Use seperable convlolutions for the first layers to limit the total mult-ads
+        # reshape_layers: list[nn.Module] = [
+        #     nn.ConvTranspose3d(input_size, out_features, layer_size, 1, 0, bias=False)
+        # ]
+        reshape_features = min(out_features, 3 * input_size)
+        reshape_layers: list[nn.Module] = [
+            nn.ConvTranspose3d(input_size, reshape_features, (x_kernel, 1, 1), 1, 0, bias=False),
+            nn.ConvTranspose3d(reshape_features, reshape_features, (1, y_kernel, 1), 1, 0, bias=False),
+            nn.ConvTranspose3d(reshape_features, reshape_features, (1, 1, z_kernel), 1, 0, bias=False),
+            nn.ConvTranspose3d(reshape_features, out_features, (1, 1, 1), 1, 0, bias=False)
+        ]
         if use_batch_norm:
             reshape_layers.append(nn.BatchNorm3d(out_features))
         reshape_layers.append(build_activation(act_fun))

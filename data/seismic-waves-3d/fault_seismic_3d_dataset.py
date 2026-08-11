@@ -5,8 +5,7 @@
 """Generate far-field 3D seismic wave propagation examples.
 
 Each sample is a point double-couple fault source in a homogeneous isotropic
-1 km cube.  The output follows the simple HDF5 convention used by
-``fouriermodes_study_mpi.py``:
+1 km cube.
 
     inputs:  sampled source/material parameters plus the output time
     fields:  displacement field with shape (3, nx, ny, nz)
@@ -26,19 +25,11 @@ exclusion radius.
 import argparse
 import os
 from pathlib import Path
-
 import numpy as np
 from numba import njit, prange
 from mpi4py import MPI
 from scipy.stats import qmc
-
-try:
-    import h5py
-except ImportError as exc:
-    raise SystemExit(
-        "This script writes HDF5 files and requires h5py, matching the existing "
-        "fouriermodes_study_mpi.py example."
-    ) from exc
+import h5py
 
 
 @njit(cache=True)
@@ -214,16 +205,21 @@ def write_sample(
     inputs,
     fields,
 ):
+    fields[np.abs(fields) < 1.0e-3] = 0.0
+
     with h5py.File(filename, mode="w") as h5:
         h5.create_dataset("inputs", data=inputs.astype(np.float32), dtype="f")
-        h5.create_dataset("fields", data=fields, dtype="f")
+        h5.create_dataset(
+            "fields",
+            data=fields,
+            dtype="f",
+            compression="lzf",
+            shuffle=True,
+        )
 
 
 def write_png(filename, fields):
-    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-
     import matplotlib
-
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
 
@@ -326,7 +322,7 @@ def main():
     parameter_table = sample_parameter_table(args)
 
     if rank == 0:
-        print(args)
+        print(args, flush=True)
         print(
             "Generating",
             args.nsamples,
@@ -339,7 +335,7 @@ def main():
             "time steps on",
             size,
             "MPI ranks",
-        )
+            flush=True)
 
     for sample in range(args.nsamples):
         if sample % size != rank:
@@ -392,12 +388,12 @@ def main():
             if args.write_png:
                 write_png(filename.with_suffix(".png"), fields)
 
-            if rank == 0 and case % 100 == 0:
-                print("wrote", filename)
+        if rank == 0:
+            print(f'{sample}/{args.nsamples}', flush=True)
 
     comm.Barrier()
     if rank == 0:
-        print("All Done!")
+        print('Done!', flush=True)
 
 
 if __name__ == "__main__":

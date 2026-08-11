@@ -17,6 +17,7 @@ dependencies = [
     "torchinfo>=1.8.0",
     "omegaconf>=2.3.0",
     "schema>=0.7.5",
+    "neuraloperator",
     "torchlayers",
     "kornia",
     "wheel",
