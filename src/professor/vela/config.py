@@ -652,7 +652,8 @@ def build_template_config(
     max_features: int = 1024,
     x_kernel: int = 4,
     y_kernel: int = 4,
-    compression: str = 'triplane',
+    z_kernel: int = 0,
+    option_3d: str = 'triplane',
     fields: list[str] = ['field'],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
 ) -> None:
@@ -671,12 +672,14 @@ def build_template_config(
 
     if z_pixels > 1:
         conf["model"]["pytorch"]["invocation"]["params"]["last_layer"]["invocation"]["params"]["n_dims"] = 3
-        if compression == 'none':
+        if option_3d == 'none':
             conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
-        elif compression == 'triplane':
+        elif option_3d == 'triplane':
             conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DTriplane"
+        elif option_3d == 'spectral':
+            conf["model"]["pytorch"]["invocation"]["target"] = "professor.torch_models.Generator3DSpectral"
         else:
-            raise Exception(f'Unrecognized 3D compression method: {compression}')
+            raise Exception(f'Unrecognized 3D option_3d method: {option_3d}')
 
     params = conf["model"]["pytorch"]["invocation"]["params"]
     params["num_channels"] = n_channels
@@ -684,6 +687,8 @@ def build_template_config(
     params["max_features"] = max_features
     params["x_kernel"] = x_kernel
     params["y_kernel"] = y_kernel
+    if z_kernel > 1:
+        params["z_kernel"] = z_kernel
 
     conf["gui"]["napari"]["fields"] = fields
 

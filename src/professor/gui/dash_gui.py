@@ -567,7 +567,7 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
 
     # Build the app layout
     data_store = dcc.Store(id="model-results", storage_type="server", data={})
-    plot_data = dcc.Store(id="plot-data", storage_type="local", data={})
+    plot_data = dcc.Store(id="plot-data", storage_type="memory", data={})
     download_file = dcc.Download(id="download-file")
     win_content = dbc.Row([dbc.Col(sidebar, width=4), dbc.Col(figure_graph, width=8)], justify="center")
     win = dbc.Container(win_content, fluid=True)
@@ -608,7 +608,7 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
         saturation: float,
     ) -> go.Figure:
         if not len(data):
-            return dash.no_updte
+            return dash.no_update
 
         # Rebuild the image from raw numpy bytes object from the local data store
         field = data["field"]

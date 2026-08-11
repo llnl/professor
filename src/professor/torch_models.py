@@ -513,16 +513,10 @@ class Generator3DSpectral(nn.Module):
             )
         )
         layers.append(self.last_layer)
-
         self.main: nn.Sequential = nn.Sequential(*layers)
-        # self.main = layers
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         x = torch.reshape(input, (input.shape[0], input.shape[1], 1, 1, 1))
-        # for ii, layer in enumerate(self.main):
-        #     print(ii, layer, x.shape)
-        #     x = layer(x)
-        # return x
         return self.main(x)
 
 
