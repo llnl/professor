@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
+import multiprocessing
 import glob
 import argparse
 import socket
@@ -230,6 +231,9 @@ def main(args: argparse.Namespace) -> None:
         raise RuntimeError("No GPUs found!")
 
     batch_size = args.batch_size
+    batch_multiplier = getattr(args, "batch_multiplier", 1)
+    if batch_multiplier < 1:
+        raise ValueError("batch_multiplier must be a positive integer.")
     lr = args.lr
     num_epochs = args.num_epochs
     seed_number = args.seed
@@ -241,9 +245,8 @@ def main(args: argparse.Namespace) -> None:
     epoch_number = 0
 
     # learning rate scaling
-    # accumulate_grad_batches * ngpu * bs * base_lr
-    accumulate_grad_batches = 1
-    lr = accumulate_grad_batches * size * batch_size * lr
+    # batch_multiplier * ngpu * bs * base_lr
+    lr = batch_multiplier * size * batch_size * lr
     if rank == 0:
         print("New effective lr=", lr)
 
@@ -432,12 +435,20 @@ def main(args: argparse.Namespace) -> None:
 
     print(f"found {n_train} training samples")
 
+    # Note: The default multiprocessing context can produce unexpected errors with CUDA
+    # "spawn" is the safest option that is available on all systems, but is not as fast
+    # "forkserver" is more efficient, but is only available on certain linux/unix systems
+    multiprocessing_context = "spawn"
+    if "forkserver" in multiprocessing.get_all_start_methods():
+        multiprocessing_context = "forkserver"
+
     train_sampler = DistributedSampler(TrainDataset, shuffle=True)
     train_loader = DataLoader(
         TrainDataset,
         batch_size=batch_size,
         sampler=train_sampler,
         num_workers=args.dataloader_workers,
+        multiprocessing_context=multiprocessing_context,
         prefetch_factor=1,
     )
 
@@ -514,15 +525,33 @@ def main(args: argparse.Namespace) -> None:
                 test_con = 0.0
                 training_losses = torch.zeros(n_models)
             with record_function("epoch_iteration"):
+                optimizer.zero_grad(set_to_none=True)
                 for batch_idx, (data, target) in enumerate(train_loader):
                     with record_function("optimizer_step"):
-                        optimizer.zero_grad()
+                        should_update_weights = (batch_idx + 1) % batch_multiplier == 0
+                        if batch_idx + 1 == n_train_loader:
+                            should_update_weights = True
+
+                        group_start = (batch_idx // batch_multiplier) * batch_multiplier
+                        group_end = min(group_start + batch_multiplier, n_train_loader)
+                        accumulation_group_size = group_end - group_start
+
                         data = data.to(device)
                         target = target.to(device)
-                        output = model(data)
-                        loss = MyLoss(output, target)
-                        loss.backward()
-                        optimizer.step()
+
+                        sync_context = contextlib.nullcontext()
+                        if not should_update_weights:
+                            sync_context = model.no_sync()
+
+                        with sync_context:
+                            output = model(data)
+                            loss = MyLoss(output, target)
+                            scaled_loss = loss / accumulation_group_size
+                            scaled_loss.backward()
+
+                        if should_update_weights:
+                            optimizer.step()
+                            optimizer.zero_grad(set_to_none=True)
                     with record_function("other_losses"):
                         with torch.no_grad():
                             losses = consolidated_loss(
