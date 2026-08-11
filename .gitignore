@@ -1,0 +1,25 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments created by the createvenv scripts
+mlvenv/
+.mlvenv*/
+
+# Training output
+runs/
+
+# Editor and OS files
+.DS_Store
+.vscode/
+.idea/
