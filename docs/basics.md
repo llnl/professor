@@ -167,8 +167,8 @@ This DDP training is a weak scaling process. If you have 10x more data, then you
 usage: prof-trainer [-h] [--batch_size BATCH_SIZE] [--lr LR] [--num_epochs NUM_EPOCHS] [--seed SEED] [--n_checkpoint N_CHECKPOINT]
                     [--loss_target LOSS_TARGET] [--max_feature MAX_FEATURE] [--min_feature MIN_FEATURE] [--restart_model RESTART_MODEL] [--keys KEYS]
                     [--dataset_path DATASET_PATH] [--dataset_type DATASET_TYPE] [--dataset_file DATASET_FILE] [--y_kernel Y_KERNEL]
-                    [--x_kernel X_KERNEL] [--dataloader_workers DATALOADER_WORKERS] [--divide_input_scale DIVIDE_INPUT_SCALE] [--n_sims N_SIMS]
-                    [--run_directory RUN_DIRECTORY]
+                    [--x_kernel X_KERNEL] [--dataloader_workers DATALOADER_WORKERS] [--hdf5_cache_size HDF5_CACHE_SIZE]
+                    [--divide_input_scale DIVIDE_INPUT_SCALE] [--n_sims N_SIMS] [--run_directory RUN_DIRECTORY]
 ```
 
 Here is a description of each command line argument
@@ -189,6 +189,7 @@ Here is a description of each command line argument
 -   `y_kernel` The number of y pixels in the first representation of the neural network. This value dictates how many deconvolutional layers are in the neural network, as each subsequent layer doubles the previous layer's number of y pixels. A smaller value typically results in more ML parameters. Usually use values between 2 and 4.
 -   `x_kernel` The number of x pixels in the first representation of the neural network. This value dictates how many deconvolutional layers are in the neural network, as each subsequent layer doubles the previous layer's number of x pixels. A smaller value typically results in more ML parameters. Usually use values between 2 and 4.
 -   `dataloader_workers` (optional) The number of threads to use on each rank to stream the data from disk to RAM.
+-   `hdf5_cache_size` (optional, dataset type 1 only) The number of hdf5 shard files each dataloader worker keeps open in a least recently used cache, instead of reopening the file for every sample. This also keeps the workers alive across epochs so their caches stay warm, and costs about `hdf5_cache_size * dataloader_workers` open files per rank. 0 (the default) reopens the file per sample.
 -   `divide_input_scale` (optional) A comma separated list to divide each input by. This is only used for dataset type 2. 
 -   `n_sims` The total number of image arrays in your dataset. This is useful for debugging, as you can set this number to be smaller than your dataset to step through smaller epochs quicker. Usually you set this to number to a value much larger number than your dataset
 -   `run_directory` (optional) The absolute path to a run directory that will write out model checkpoints and tensorboard results. Use of this folder will trigger a check of existing checkpoints. If checkpoints exist the model will restart from the latest checkpoint.

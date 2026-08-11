@@ -114,6 +114,14 @@ def prof_trainer() -> None:
         help="The number of threads to use on each rank to stream the data from disk to RAM.",  # noqa E501
     )
     parser.add_argument(
+        "--hdf5_cache_size",
+        type=int,
+        default=0,
+        help="Number of hdf5 files each dataloader worker keeps open in an LRU"
+        " cache, instead of reopening per sample. Also keeps workers alive"
+        " across epochs. Only used on type 1 dataset.",
+    )
+    parser.add_argument(
         "--divide_input_scale",
         default="1,1,1,1",
         type=str,
@@ -141,6 +149,8 @@ def prof_trainer() -> None:
     parser.add_argument("--compile", action="store_true", help="Whether to use torch.compile to optimize the module.")
     parser.add_argument("--vis-config", type=str, default="", help="Build a template visualization config file.")
     args = parser.parse_args()
+    if args.hdf5_cache_size > 0 and args.dataset_type != 1:
+        parser.error("--hdf5_cache_size requires --dataset_type 1")
 
     from professor.mltrainer import main
 

@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 from torch.profiler import profile, record_function, ProfilerActivity
 import professor
+from professor.hdf5_cache import HDF5FileCache
 from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
 from professor.torch_models import Generator
@@ -102,6 +103,7 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         filelist: NDArray[np.str_],
         n_channels: int,
         path: str,
+        cache_size: int = 0,
     ):
         self._length: int = len(filelist)
         self._path: str = path
@@ -110,6 +112,7 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
+        self.cache = HDF5FileCache(cache_size) if cache_size > 0 else None
         self.__getsizes__(0)
 
     def __len__(self) -> int:
@@ -120,7 +123,13 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         idx = self.filelist[i][1]
         myfile = f"{self._path}/{file}"
         try:
-            with h5py.File(myfile, "r") as f:
+            # a cached handle is owned by the cache and must not be closed
+            handle = (
+                contextlib.nullcontext(self.cache.open_file(myfile))
+                if self.cache is not None
+                else h5py.File(myfile, "r")
+            )
+            with handle as f:
                 # calling nan_to_num does seem to impact performance
                 # inputs = np.nan_to_num(f['inputs'][idx])
                 # data = np.nan_to_num(f['fields'][idx])
@@ -244,6 +253,9 @@ def main(args: argparse.Namespace) -> None:
     n_models = len(keys)
     epoch_number = 0
 
+    # getattr keeps hand-built Namespaces in tests working
+    hdf5_cache_size = getattr(args, "hdf5_cache_size", 0)
+
     # learning rate scaling
     # batch_multiplier * ngpu * bs * base_lr
     lr = batch_multiplier * size * batch_size * lr
@@ -335,6 +347,7 @@ def main(args: argparse.Namespace) -> None:
             filelist_train,
             n_channels=n_channels,
             path=path,
+            cache_size=hdf5_cache_size,
         )
     elif args.dataset_type == 2:
         TrainDataset = CompleteDatasetDivideScaling(
@@ -450,6 +463,8 @@ def main(args: argparse.Namespace) -> None:
         num_workers=args.dataloader_workers,
         multiprocessing_context=multiprocessing_context,
         prefetch_factor=1,
+        # keep workers and their handle caches alive across epochs
+        persistent_workers=(hdf5_cache_size > 0 and args.dataloader_workers > 0),
     )
 
     val_loader = torch.utils.data.DataLoader(
