@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
+import multiprocessing
 import glob
 import argparse
 import socket
@@ -434,13 +435,20 @@ def main(args: argparse.Namespace) -> None:
 
     print(f"found {n_train} training samples")
 
+    # Note: The default multiprocessing context can produce unexpected errors with CUDA
+    # "spawn" is the safest option that is available on all systems, but is not as fast
+    # "forkserver" is more efficient, but is only available on certain linux/unix systems
+    multiprocessing_context = "spawn"
+    if "forkserver" in multiprocessing.get_all_start_methods():
+        multiprocessing_context = "forkserver"
+
     train_sampler = DistributedSampler(TrainDataset, shuffle=True)
     train_loader = DataLoader(
         TrainDataset,
         batch_size=batch_size,
         sampler=train_sampler,
         num_workers=args.dataloader_workers,
-        multiprocessing_context="spawn",
+        multiprocessing_context=multiprocessing_context,
         prefetch_factor=1,
     )
 
