@@ -571,6 +571,9 @@ def main(args: argparse.Namespace) -> None:
                 training_losses = torch.zeros(n_models)
             with record_function("epoch_iteration"):
                 optimizer.zero_grad(set_to_none=True)
+                if optimizer_complex is not None:
+                    optimizer_complex.zero_grad(set_to_none=True)
+
                 for batch_idx, (data, target) in enumerate(train_loader):
                     with record_function("optimizer_step"):
                         should_update_weights = (batch_idx + 1) % batch_multiplier == 0
@@ -596,7 +599,13 @@ def main(args: argparse.Namespace) -> None:
 
                         if should_update_weights:
                             optimizer.step()
+                            if optimizer_complex is not None:
+                                optimizer_complex.step()
+
                             optimizer.zero_grad(set_to_none=True)
+                            if optimizer_complex is not None:
+                                optimizer_complex.zero_grad(set_to_none=True)
+
                     with record_function("other_losses"):
                         with torch.no_grad():
                             losses = consolidated_loss(
