@@ -42,32 +42,32 @@ def test_eviction_closes_lru(make_shard):
     fa = cache.open_file(make_shard("a.h5"))
     fb = cache.open_file(make_shard("b.h5"))
     fc = cache.open_file(make_shard("c.h5"))
-    assert not bool(fa)  # closed h5py.File is falsy
-    assert bool(fb) and bool(fc)
+    assert not fa
+    assert fb and fc
     assert len(cache) == 2
 
 
 def test_access_refreshes_recency(make_shard):
     cache = HDF5FileCache(capacity=2)
-    pa, pb = make_shard("a.h5"), make_shard("b.h5")
-    fa = cache.open_file(pa)
-    fb = cache.open_file(pb)
-    cache.open_file(pa)  # a is now most recent
-    cache.open_file(make_shard("c.h5"))  # evicts b
-    assert bool(fa)
-    assert not bool(fb)
+    sa, sb = make_shard("a.h5"), make_shard("b.h5")
+    fa = cache.open_file(sa)
+    fb = cache.open_file(sb)
+    cache.open_file(sa)  # make shard a  most recent
+    cache.open_file(make_shard("c.h5"))  # evict shard b
+    assert fa
+    assert not fb
 
 
 def test_pid_change_resets_without_close(make_shard):
     cache = HDF5FileCache(capacity=2)
     path = make_shard("a.h5")
-    old = cache.open_file(path)
-    cache.pid = cache.pid + 1  # simulate a forked worker
-    fresh = cache.open_file(path)
-    assert fresh is not old
-    assert bool(old)  # inherited handle was NOT closed
+    original_file_handle = cache.open_file(path)
+    cache.pid = cache.pid + 1  # simulates a forked worker
+    new_file_handle = cache.open_file(path)
+    assert new_file_handle is not original_file_handle
+    assert original_file_handle  # assert inherited handle was NOT closed
     assert len(cache) == 1
-    old.close()
+    original_file_handle.close()
 
 
 def test_capacity_validation():
@@ -98,6 +98,8 @@ def test_dataset_reads_through_cache(make_shard, tmp_path):
 
     make_shard("a.h5", n_samples=3)
     make_shard("b.h5", n_samples=2)
+    
+    # create a dataset file list
     rows = [("a.h5", j) for j in range(3)] + [("b.h5", j) for j in range(2)]
     filelist = np.array(rows, dtype=[("f0", "U64"), ("f1", np.int64)])
 
