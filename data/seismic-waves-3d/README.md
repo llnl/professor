@@ -9,6 +9,10 @@ cubic domain. Coordinates use an east-north-up (ENU) convention: `x` is east,
 `y` is north, and `z` is up.
 This script uses the far-field assumption and a gaussian pulse for the moment rate function.
 
+Note: this case produces data that are challenging to fit with typical ML models due to zero-value inflation.
+These are being used to test in-development features to improve professor scaling/training performance.
+
+
 ## Sampled parameters
 
 Each realization samples eight parameters with a Latin hypercube:
