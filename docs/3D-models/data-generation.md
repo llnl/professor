@@ -66,19 +66,16 @@ For the default three sources, each HDF5 file should contain:
 | `inputs` | `(10,)` | Diffusivity, then x/y/z for sources 0, 1, and 2 |
 | `fields` | `(1, 128, 128, 128)` | One scalar concentration-like diffusion field |
 
-You can check a file without loading the full dataset:
+You can check a file without loading the full dataset using a simple python script:
 
-```bash
-python - <<'PY'
-from pathlib import Path
-
+```python
+import glob
 import h5py
 
-dataset = Path("/path/to/data/point_diffusion")
-sample = next(dataset.glob("*.h5"))
+dataset = glob.glob("/path/to/data/point_diffusion/*.h5")
+sample = dataset[0]
 with h5py.File(sample, "r") as h5:
     print(sample.name, h5["inputs"].shape, h5["fields"].shape)
-PY
 ```
 
 

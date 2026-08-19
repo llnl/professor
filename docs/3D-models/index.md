@@ -12,8 +12,7 @@ The target dataset is produced by
 `data/point-source-diffusion-3d/point_source_diffusion.py`. Each realization
 adds the analytical diffusion fields from several point sources in a unit
 cube. The default three-source dataset has ten inputs: one diffusivity followed
-by the x, y, and z coordinates of each source. The target is a single-channel
-volume with shape `(1, R, R, R)`.
+by the x, y, and z coordinates of each source.
 
 ![Three orthogonal midplane slices through an example point-source diffusion field](images/example_data_slices.png)
 
