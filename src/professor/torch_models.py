@@ -1261,22 +1261,23 @@ def build_generator(
         )
 
     elif generator_type == "3D-spectral":
-        return Generator3DSpectral(
-            input_size,
-            im_size,
-            num_channels,
-            min_features=min_features,
-            max_features=max_features,
-            first_layer=first_layer,
-            last_layer=last_layer,
-            use_batch_norm=use_batch_norm,
-            y_kernel=y_kernel,
-            x_kernel=x_kernel,
-            z_kernel=z_kernel,
-            act_fun=act_fun,
-            upscale_type=upscale_type,
-            last_bias=last_bias,
-        )
+        raise NotImplementedError("3D spectral generators are under construction")
+        # return Generator3DSpectral(
+        #     input_size,
+        #     im_size,
+        #     num_channels,
+        #     min_features=min_features,
+        #     max_features=max_features,
+        #     first_layer=first_layer,
+        #     last_layer=last_layer,
+        #     use_batch_norm=use_batch_norm,
+        #     y_kernel=y_kernel,
+        #     x_kernel=x_kernel,
+        #     z_kernel=z_kernel,
+        #     act_fun=act_fun,
+        #     upscale_type=upscale_type,
+        #     last_bias=last_bias,
+        # )
     elif generator_type == "3D-voxel":
         return Generator3DVoxel(
             input_size,

@@ -125,6 +125,10 @@ def far_field_displacement(
     moment: float,
     duration: float,
 ) -> Float32Array:
+    """
+    Generate 3D seismic displacement values from a slipping fault using
+    the far-field assumption.
+    """
     npoints = points.shape[0]
     nt = times.shape[0]
     out = np.zeros((nt, 3, npoints), dtype=np.float32)
@@ -183,6 +187,9 @@ def build_points(
     nz: int,
     domain_size: float,
 ) -> tuple[Float64Array, Float64Array, Float64Array, Float64Array]:
+    """
+    Build a grid of points to calculate seismic displacement
+    """
     x = np.linspace(0.0, domain_size, nx, dtype=np.float64)
     y = np.linspace(0.0, domain_size, ny, dtype=np.float64)
     z = np.linspace(0.0, domain_size, nz, dtype=np.float64)
@@ -192,10 +199,14 @@ def build_points(
 
 
 def sample_parameter_table(args: argparse.Namespace) -> Float64Array:
+    """
+    Build a table of model parameters to sample from
+    """
+
     if args.nsamples == 0:
         return np.empty((0, 8), dtype=np.float64)
 
-    sampler = qmc.LatinHypercube(d=8, seed=args.seed)
+    sampler = qmc.LatinHypercube(d=8)
     unit = sampler.random(n=args.nsamples)
     source_min = 0.0
     source_max = args.domain_size
@@ -231,6 +242,9 @@ def sample_parameter_table(args: argparse.Namespace) -> Float64Array:
 
 
 def input_names(split_z: bool) -> tuple[str, ...]:
+    """
+    Handle the output names for the model
+    """
     names = BASE_INPUT_NAMES
     if split_z:
         names = (*BASE_INPUT_NAMES, Z_INPUT_NAME)
@@ -238,6 +252,9 @@ def input_names(split_z: bool) -> tuple[str, ...]:
 
 
 def input_scaling_bounds(args: argparse.Namespace, time_upper: float) -> tuple[Float64Array, Float64Array]:
+    """
+    Manage input parameter scaling
+    """
     source_min = 0.0
     source_max = args.domain_size
 
@@ -277,16 +294,17 @@ def input_scaling_bounds(args: argparse.Namespace, time_upper: float) -> tuple[F
 
 
 def scale_inputs_to_unit_range(inputs: Float64Array, lower: Float64Array, upper: Float64Array) -> Float64Array:
+    """
+    Normalize model input values
+    """
     return (inputs - lower) / (upper - lower)
 
 
 def threshold_fields_for_write(fields: Float32Array) -> None:
+    """
+    Clip very small input values to improve hdf5 file compression
+    """
     fields[np.abs(fields) < 1.0e-3] = 0.0
-
-
-def clip_displacement_fields(fields: Float32Array) -> None:
-    displacement_limit = np.nextafter(np.float32(1.0), np.float32(0.0))
-    np.clip(fields, -displacement_limit, displacement_limit, out=fields)
 
 
 def update_ranges(
@@ -297,6 +315,9 @@ def update_ranges(
     label_min: Float64Array,
     label_max: Float64Array,
 ) -> None:
+    """
+    Keep track of model ranges
+    """
     input_min[:] = np.minimum(input_min, inputs)
     input_max[:] = np.maximum(input_max, inputs)
 
@@ -306,6 +327,9 @@ def update_ranges(
 
 
 def yaml_float(value: float | np.floating[Any]) -> str:
+    """
+    Check floating point values before writing
+    """
     if np.isfinite(value):
         return format(float(value), ".9g")
     return "null"
@@ -319,6 +343,9 @@ def write_scaling_yaml(
     label_min: Float64Array,
     label_max: Float64Array,
 ) -> None:
+    """
+    Save dataset scaling parameters to a yaml format file
+    """
     with open(filename, mode="w", encoding="utf-8") as scaling_file:
         scaling_file.write("inputs:\n")
         for index, name in enumerate(names):
@@ -341,6 +368,9 @@ def write_sample(
     input_lower: Float64Array,
     input_upper: Float64Array,
 ) -> None:
+    """
+    Write a model realization to a hdf5 format file
+    """
     with h5py.File(filename, mode="w") as h5:
         inputs_dataset = h5.create_dataset("inputs", data=inputs.astype(np.float32), dtype="f")
         inputs_dataset.attrs["scaled_to_unit_range"] = inputs_scaled
@@ -357,6 +387,9 @@ def write_sample(
 
 
 def write_png(filename: Path, fields: Float32Array) -> None:
+    """
+    Render a model realization as an image
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -385,42 +418,47 @@ def write_png(filename: Path, fields: Float32Array) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """
+    Build input parser
+    """
     parser = argparse.ArgumentParser(description="Generate HDF5 samples of far-field 3D seismic waves.")
-    parser.add_argument("-n", "--nsamples", default=16, type=int)
-    parser.add_argument("-o", "--output-dir", default="fault_seismic_3d_data")
-    parser.add_argument("--seed", default=12345, type=int)
+    parser.add_argument("-n", "--nsamples", default=16, type=int, help='Number of samples')
+    parser.add_argument("-o", "--output-dir", default="fault_seismic_3d_data", help='Output directory')
 
-    parser.add_argument("-nx", "--nx", default=32, type=int)
-    parser.add_argument("-ny", "--ny", default=32, type=int)
-    parser.add_argument("-nz", "--nz", default=32, type=int)
-    parser.add_argument("--domain-size", default=1000.0, type=float)
+    parser.add_argument("-nx", "--nx", default=32, type=int, help='Number of cells along x-axis')
+    parser.add_argument("-ny", "--ny", default=32, type=int, help='Number of cells along y-axis')
+    parser.add_argument("-nz", "--nz", default=32, type=int, help='Number of cells along z-axis')
+    parser.add_argument("--domain-size", default=1000.0, type=float, help='Target domain size')
 
-    parser.add_argument("--t-min", default=0.01, type=float)
-    parser.add_argument("--t-max", default=0.20, type=float)
-    parser.add_argument("--dt", default=0.01, type=float)
-    parser.add_argument("--source-duration", default=0.04, type=float)
+    parser.add_argument("--t-min", default=0.01, type=float, help='Start time')
+    parser.add_argument("--t-max", default=0.20, type=float, help='End time')
+    parser.add_argument("--dt", default=0.01, type=float, help='Timestep size')
+    parser.add_argument("--source-duration", default=0.04, type=float, help='Seismic source duration')
 
-    parser.add_argument("--vp-min", default=2500.0, type=float)
-    parser.add_argument("--vp-max", default=6500.0, type=float)
-    parser.add_argument("--vp-vs-min", default=1.65, type=float)
-    parser.add_argument("--vp-vs-max", default=1.85, type=float)
-    parser.add_argument("--density", default=2500.0, type=float)
-    parser.add_argument("--dip-min", default=float(np.deg2rad(5.0)), type=float)
-    parser.add_argument("--dip-max", default=float(np.deg2rad(90.0)), type=float)
-    parser.add_argument("--moment", default=1.0e13, type=float)
-    parser.add_argument("--displacement-scale", default=40.0, type=float)
+    parser.add_argument("--vp-min", default=2500.0, type=float, help='Min p-wave velocity')
+    parser.add_argument("--vp-max", default=6500.0, type=float, help='Max p-wave velocity')
+    parser.add_argument("--vp-vs-min", default=1.65, type=float, help='Min vp/vs ratio')
+    parser.add_argument("--vp-vs-max", default=1.85, type=float, help='Max vp/vs ratio')
+    parser.add_argument("--density", default=2500.0, type=float, help='Average rock density')
+    parser.add_argument("--dip-min", default=float(np.deg2rad(5.0)), type=float, help='Min fault dip')
+    parser.add_argument("--dip-max", default=float(np.deg2rad(90.0)), type=float, help='Max fault dip')
+    parser.add_argument("--moment", default=1.0e13, type=float, help='Seismic moment release')
+    parser.add_argument("--displacement-scale", default=40.0, type=float, help='Displacement scaling factor')
     parser.add_argument(
         "--scale-inputs",
         action="store_true",
-        help="write each HDF5 inputs value min-max scaled to the unit range",
+        help="Normalize the generated displacement values",
     )
-    parser.add_argument("--write-png", action="store_true")
-    parser.add_argument("--split-z", action="store_true")
+    parser.add_argument("--write-png", action="store_true", help='Render images of each generated case')
+    parser.add_argument("--split-z", action="store_true", help='Store each z-slice as a 2D array in separate files')
 
     return parser.parse_args()
 
 
 def validate_args(args: argparse.Namespace) -> None:
+    """
+    Check user inputs
+    """
     if args.nx <= 1 or args.ny <= 1 or args.nz <= 1:
         raise ValueError("nx, ny, and nz must all be greater than 1")
     if args.nsamples < 0:
@@ -448,6 +486,9 @@ def validate_args(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    """
+    Generate synthetic 3D seismic data for ML model training
+    """
     args = parse_args()
     validate_args(args)
 
@@ -515,7 +556,6 @@ def main() -> None:
             args.source_duration,
         )
         fields_flat *= args.displacement_scale
-        clip_displacement_fields(fields_flat)
 
         for it, time_value in enumerate(times):
             fields = fields_flat[it].reshape(3, args.nx, args.ny, args.nz)

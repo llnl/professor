@@ -140,7 +140,7 @@ def prof_trainer() -> None:
         "--generator-type",
         type=str,
         default="legacy",
-        help="Generator type (legacy, 2D, 3D-triplane, 3D-spectral, 3D-voxel)",
+        help="Generator type (legacy [default], 2D, 3D-triplane, 3D-voxel)",
     )
     parser.add_argument(
         "--act-fun",

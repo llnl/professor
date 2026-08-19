@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 import h5py
@@ -20,6 +19,9 @@ ParameterRange = tuple[str, float, float]
 def generate_field(
     source_positions: SourcePositions, source_strengths: FloatArray, diffusivity: float, time: float, grid: Grid
 ) -> FloatArray:
+    """
+    Build a model realization with a number of point source positions and strength
+    """
     if diffusivity <= 0:
         raise ValueError("diffusivity must be positive")
     if time <= 0:
@@ -43,6 +45,9 @@ def make_grid(
     domain_min: float = 0.0,
     domain_max: float = 1.0,
 ) -> Grid:
+    """
+    Setup the model grid
+    """
     if resolution < 2:
         raise ValueError("resolution must be at least 2")
 
@@ -59,7 +64,6 @@ def make_grid(
 def sample_parameter_distribution(
     num_samples: int,
     num_sources: int,
-    seed: int | None = None,
     domain_min: float = 0.1,
     domain_max: float = 0.9,
     diffusivity_min: float = 0.05,
@@ -69,6 +73,21 @@ def sample_parameter_distribution(
     strength_min: float = 0.5,
     strength_max: float = 1.5,
 ) -> tuple[FloatArray, float]:
+    """
+    Build input model parameters
+
+    Args:
+        num_samples (int): The number of samples
+        num_sources (int): The number of point sources
+        domain_min (float): Lower range for point source position
+        domain_max (float): Upper range for point source position
+        diffusivity_min (float): Minimum diffusivity
+        diffusivity_max (float): Maximum diffusivity
+        time (float): Snapshot time
+        vary_strength (bool): If true, then vary each source strength (default = False)
+        strength_min (float): Minimum source strength
+        strength_max (flaot): Maximum source strength
+    """
     if num_samples < 1:
         raise ValueError("num_samples must be positive")
     if num_sources < 1:
@@ -87,7 +106,7 @@ def sample_parameter_distribution(
     if vary_strengths:
         dimensions += num_sources
 
-    sampler = qmc.LatinHypercube(d=dimensions, seed=seed)
+    sampler = qmc.LatinHypercube(d=dimensions)
     unit_samples = sampler.random(n=num_samples)
 
     parameters = np.zeros(
@@ -95,24 +114,17 @@ def sample_parameter_distribution(
         dtype=np.float32,
     )
 
-    column = 0
+    # The first table column is the model diffusivity
+    parameters[:, 0] = diffusivity_min + unit_samples[:, 0] * (diffusivity_max - diffusivity_min)
 
-    parameters[:, column] = diffusivity_min + unit_samples[:, column] * (diffusivity_max - diffusivity_min)
-    column += 1
+    # The next table columns contain the x, y, z positions of the sources
+    for ii in range(num_sources):
+        for jj in range(3):
+            parameters[:, 3*ii + jj + 1] = domain_min + unit_samples[:, 3*ii + jj + 1] * (domain_max - domain_min)
 
-    for _ in range(num_sources):
-        parameters[:, column] = domain_min + unit_samples[:, column] * (domain_max - domain_min)
-        column += 1
-
-        parameters[:, column] = domain_min + unit_samples[:, column] * (domain_max - domain_min)
-        column += 1
-
-        parameters[:, column] = domain_min + unit_samples[:, column] * (domain_max - domain_min)
-        column += 1
-
+    # The final table columns contain the optional source amplitudes
     if vary_strengths:
-        parameters[:, column:] = strength_min + unit_samples[:, column:] * (strength_max - strength_min)
-
+        parameters[:, -num_sources:] = strength_min + unit_samples[:, -num_sources:] * (strength_max - strength_min)
     return parameters, time
 
 
@@ -121,8 +133,10 @@ def unpack_parameters(
     num_sources: int,
     time: float,
 ) -> tuple[SourcePositions, FloatArray, float, float]:
+    """
+    Unpack model parameters from the base table
+    """
     position_count = 3 * num_sources
-
     diffusivity = float(parameters[0])
     positions = parameters[1 : 1 + position_count].reshape(
         num_sources,
@@ -130,7 +144,6 @@ def unpack_parameters(
     )
 
     strengths_start = 1 + position_count
-
     if parameters.size > strengths_start:
         strengths = parameters[strengths_start:]
     else:
@@ -149,6 +162,9 @@ def build_parameter_ranges(
     strength_min: float,
     strength_max: float,
 ) -> tuple[ParameterRange, ...]:
+    """
+    Build model parameter ranges
+    """
     parameter_ranges: list[ParameterRange] = [
         ("diffusivity", diffusivity_min, diffusivity_max),
     ]
@@ -180,6 +196,9 @@ def normalize_parameters(
     parameters: FloatArray,
     parameter_ranges: tuple[ParameterRange, ...],
 ) -> FloatArray:
+    """
+    Normalize the model parameters
+    """
     lower = np.array(
         [parameter_min for _, parameter_min, _ in parameter_ranges],
         dtype=np.float32,
@@ -200,6 +219,9 @@ def measure_parameter_ranges(
     parameters: FloatArray,
     parameter_ranges: tuple[ParameterRange, ...],
 ) -> tuple[ParameterRange, ...]:
+    """
+    Get the model parameter range
+    """
     measured_ranges: list[ParameterRange] = []
 
     for index, (name, _, _) in enumerate(parameter_ranges):
@@ -215,6 +237,9 @@ def measure_parameter_ranges(
 
 
 def yaml_float(value: float | np.floating) -> str:
+    """
+    Check floating point values before writing
+    """
     if np.isfinite(value):
         return format(float(value), ".9g")
     return "null"
@@ -225,6 +250,9 @@ def write_parameter_ranges_yaml(
     parameter_ranges: tuple[ParameterRange, ...],
     normalized: bool,
 ) -> None:
+    """
+    Save dataset scaling parameters to a yaml-format file
+    """
     with open(filename, mode="w", encoding="utf-8") as ranges_file:
         ranges_file.write(f"normalized: {str(normalized).lower()}\n")
         ranges_file.write("parameters:\n")
@@ -240,6 +268,9 @@ def write_sample(
     parameters: FloatArray,
     field: FloatArray,
 ) -> None:
+    """
+    Write a model realization as an hdf5 format file
+    """
     with h5py.File(filename, "w") as output:
         output.create_dataset("inputs", data=parameters)
         output.create_dataset("fields", data=field[None, ...], dtype="float32", compression="lzf", shuffle=True)
@@ -249,15 +280,11 @@ def write_sample_png(
     filename: Path,
     field: FloatArray,
 ) -> None:
-    if "MPLCONFIGDIR" not in os.environ:
-        matplotlib_config_dir = Path("/tmp") / f"matplotlib-{os.getuid()}"
-        matplotlib_config_dir.mkdir(parents=True, exist_ok=True)
-        os.environ["MPLCONFIGDIR"] = str(matplotlib_config_dir)
-
+    """
+    Render a model realization as an image
+    """
     import matplotlib
-
     matplotlib.use("Agg")
-
     import matplotlib.pyplot as plt
 
     midplane = field.shape[0] // 2
@@ -276,8 +303,9 @@ def write_sample_png(
         constrained_layout=True,
     )
 
+    cb_ax = axes[0]
     for axis, (image, title, xlabel, ylabel) in zip(axes, slices):
-        plot = axis.imshow(
+        cb_ax = axis.imshow(
             image.T,
             origin="lower",
             cmap="viridis",
@@ -291,7 +319,7 @@ def write_sample_png(
         axis.set_ylabel(ylabel)
 
     figure.colorbar(
-        plot,
+        cb_ax,
         ax=axes,
         shrink=0.8,
         label="field",
@@ -301,6 +329,10 @@ def write_sample_png(
 
 
 def generate_samples(args: argparse.Namespace) -> None:
+    """
+    Generate a synthetic 3D dataset containing overlapping point
+    diffusion sources
+    """
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -312,7 +344,6 @@ def generate_samples(args: argparse.Namespace) -> None:
         parameters, time = sample_parameter_distribution(
             num_samples=args.num_samples,
             num_sources=args.num_sources,
-            seed=args.seed,
             domain_min=args.source_min,
             domain_max=args.source_max,
             diffusivity_min=args.diffusivity_min,
@@ -406,6 +437,9 @@ def generate_samples(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """
+    Build the input parser
+    """
     parser = argparse.ArgumentParser(description="Generate analytical 3D multi-source diffusion fields.")
 
     parser.add_argument(
@@ -435,12 +469,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="./diffusion_data",
         help="Output directory",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Random seed",
     )
     parser.add_argument(
         "--time",

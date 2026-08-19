@@ -478,27 +478,34 @@ def main(args: argparse.Namespace) -> None:
     )
 
     # Build optimizers
-    # Note: complex parameters must be handled in a separate step with the ZeroRedundancyOptimizer
-    real_params = [p for p in model.parameters() if p.dtype == torch.float32]
-    complex_params = [p for p in model.parameters() if p.dtype == torch.complex64]
     optimizer = ZeroRedundancyOptimizer(
-        real_params,
+        model.parameters(),
         optimizer_class=torch.optim.Adam,
         lr=lr,
     )
-    optimizer_complex = None
-    if len(complex_params):
-        optimizer_complex = ZeroRedundancyOptimizer(
-            complex_params,
-            optimizer_class=torch.optim.Adam,
-            lr=lr,
-        )
+
+    # Note: complex parameters must be handled in a separate step with the ZeroRedundancyOptimizer
+    #       this option needs additional testing, so defer it to a future PR
+    # real_params = [p for p in model.parameters() if p.dtype == torch.float32]
+    # complex_params = [p for p in model.parameters() if p.dtype == torch.complex64]
+    # optimizer = ZeroRedundancyOptimizer(
+    #     real_params,
+    #     optimizer_class=torch.optim.Adam,
+    #     lr=lr,
+    # )
+    # optimizer_complex = None
+    # if len(complex_params):
+    #     optimizer_complex = ZeroRedundancyOptimizer(
+    #         complex_params,
+    #         optimizer_class=torch.optim.Adam,
+    #         lr=lr,
+    #     )
 
     if restart:
         # load optimizer state
         optimizer.load_state_dict(torch.load(restart_model)["optimizer"])
-        if optimizer_complex is not None:
-            optimizer_complex.load_state_dict(torch.load(restart_model)["optimizer_complex"])
+        # if optimizer_complex is not None:
+        #     optimizer_complex.load_state_dict(torch.load(restart_model)["optimizer_complex"])
         print(f"[Rank{rank}] loaded previous optimizer state")
 
     if args.vis_config and rank == 0:
@@ -571,8 +578,8 @@ def main(args: argparse.Namespace) -> None:
                 training_losses = torch.zeros(n_models)
             with record_function("epoch_iteration"):
                 optimizer.zero_grad(set_to_none=True)
-                if optimizer_complex is not None:
-                    optimizer_complex.zero_grad(set_to_none=True)
+                # if optimizer_complex is not None:
+                #     optimizer_complex.zero_grad(set_to_none=True)
 
                 for batch_idx, (data, target) in enumerate(train_loader):
                     with record_function("optimizer_step"):
@@ -599,12 +606,12 @@ def main(args: argparse.Namespace) -> None:
 
                         if should_update_weights:
                             optimizer.step()
-                            if optimizer_complex is not None:
-                                optimizer_complex.step()
+                            # if optimizer_complex is not None:
+                            #     optimizer_complex.step()
 
                             optimizer.zero_grad(set_to_none=True)
-                            if optimizer_complex is not None:
-                                optimizer_complex.zero_grad(set_to_none=True)
+                            # if optimizer_complex is not None:
+                            #     optimizer_complex.zero_grad(set_to_none=True)
 
                     with record_function("other_losses"):
                         with torch.no_grad():
@@ -676,14 +683,14 @@ def main(args: argparse.Namespace) -> None:
 
                 if epoch % n_checkpoint == 0 or epoch == num_epochs - 1:
                     optimizer.consolidate_state_dict()
-                    if optimizer_complex is not None:
-                        optimizer_complex.consolidate_state_dict()
+                    # if optimizer_complex is not None:
+                    #     optimizer_complex.consolidate_state_dict()
 
                     if rank == 0:
                         filepath = f"{output_dir}/{epoch:04d}q"
                         state = {"optimizer": optimizer.state_dict()}
-                        if optimizer_complex is not None:
-                            state["optimizer_complex"] = optimizer_complex.state_dict()
+                        # if optimizer_complex is not None:
+                        #     state["optimizer_complex"] = optimizer_complex.state_dict()
 
                         state["model"] = model.module.state_dict()
                         torch.save(state, filepath)

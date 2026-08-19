@@ -22,7 +22,6 @@ options:
   -n N, --num-samples N    Number of random samples to generate
   -o F, --output F         Path to place the resulting files
   -r R, --resolution R     Image resolution
-  -s S, --seed S           Optional random seed
 ```
 
 
