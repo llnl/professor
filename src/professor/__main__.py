@@ -64,10 +64,7 @@ def prof_trainer() -> None:
         "--loss_target",
         default="l1",
         type=str,
-        help=(
-            "Either 'l1' for mean absolute error, 'l2' for mean squared error, "
-            "or 'zero_heavy' for weighted signal-aware L1 loss. Default is l1"
-        ),
+        help="Either 'l1' for mean absolute error, or 'l2' for mean squared error. Default is l1",
     )
     parser.add_argument(
         "--max_feature",

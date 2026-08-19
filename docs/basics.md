@@ -178,7 +178,7 @@ Here is a description of each command line argument
 -   `num_epochs` The total number of training epochs. One epoch is one iteration through the entire dataset.
 -   `seed` The pseudorandom seed. This does not do much right now as two exact training script will return different ML Models because this does not control the random weight initialization in the ML model.
 -   `n_checkpoint` The frequency of epochs to checkpoint the model weights to disk.
--   `loss_target` The objective for the ML training optimizer. Either 'l1' for mean absolute error, 'l2' for mean squared error, or 'zero_heavy' for weighted signal-aware L1 loss are acceptable. Default is 'l1'.
+-   `loss_target` The objective for the ML training optimizer. Either 'l1' for mean absolute error, or 'l2' for mean squared error are acceptable. Default is 'l1'.
 -   `max_feature` The maximum number of channels in the intermediate state of the ML model. If this value is 1024, then you could think of a 1024 colors of a single image. Typically use powers of 2. A larger value means you will have more ML parameters, and have a more complicated intermediate state.
 -   `min_feature` The minimum number of channels in the intermediate state of the ML model. Typically use powers of 2. A smaller value means you will have less ML parameters, and a smaller bottleneck in the ML model.
 -   `restart_model` (optional) The absolute file path to a previous model checkpoint '.pt' file.
