@@ -63,7 +63,10 @@ executable = EXE(
     pyz,
     analysis.scripts,
     [],
+    # Keep dependencies beside the executable instead of embedding them in a
+    # single-file executable. COLLECT below assembles the onedir distribution.
     exclude_binaries=True,
+    contents_directory="_internal",
     name="prof-dash-gui",
     debug=False,
     bootloader_ignore_signals=False,
