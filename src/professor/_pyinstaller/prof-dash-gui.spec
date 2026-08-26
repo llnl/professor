@@ -30,6 +30,9 @@ extra_hidden_imports = [
 hidden_imports = [
     "professor.layers",
     "professor.torch_models",
+    "flask",
+    "jinja2",
+    "dash"
 ]
 hidden_imports += collect_submodules("torchlayers")
 hidden_imports += extra_hidden_imports
