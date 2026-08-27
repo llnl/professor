@@ -642,6 +642,7 @@ def build_template_config(
     checkpoint_path: str = "0000.pt",
     n_inputs: int = 1,
     n_channels: int = 1,
+    intermediate_channels: int = 3,
     x_pixels: int = 512,
     y_pixels: int = 512,
     z_pixels: int = 1,
@@ -653,6 +654,7 @@ def build_template_config(
     generator_type: str = "legacy",
     act_fun: str = "ReLU",
     upscale_type: str = "transpose",
+    residual: bool = False,
     fields: list[str] = ["field"],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
 ) -> None:
@@ -699,6 +701,8 @@ def build_template_config(
 
     if generator_type in ["2D", "3D-triplane", "3D-spectral", "3D-voxel"]:
         params["upscale_type"] = upscale_type
+        params["residual"] = residual
+        params["intermediate_channels"] = intermediate_channels
 
     conf["gui"]["napari"]["fields"] = fields
 

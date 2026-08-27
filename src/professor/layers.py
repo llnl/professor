@@ -388,6 +388,7 @@ class UpscaleBlock3DSpectral(nn.Module):
         upscale_type: str = "transpose",
         activation_function: nn.Module | None = None,
     ):
+        # TODO: add this requirement to the pyroject.toml when this feature is ready
         from neuralop.layers.spectral_convolution import SpectralConv  # type: ignore
 
         super().__init__()

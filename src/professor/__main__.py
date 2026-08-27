@@ -19,6 +19,14 @@ GENERATOR_ACTIVATION_FUNCTIONS = (
     "ELU",
 )
 
+GENERATOR_TYPES = (
+    "legacy",
+    "2D",
+    "3D-triplane",
+    "3D-voxel",
+    # "3D-spectral"
+)
+
 
 def prof_trainer() -> None:
 
@@ -133,11 +141,19 @@ def prof_trainer() -> None:
         default="transpose",
         help="Data upscaling method (transpose, nearest, linear)",
     )
+    parser.add_argument("--residual", action="store_true", help="Use residual layers in the model.")
+    parser.add_argument(
+            "--intermediate-channels",
+            type=int,
+            default=3,
+            help="Number of intermediate channels to use prior to 3D triplane reconstruction",
+        )
     parser.add_argument(
         "--generator-type",
         type=str,
         default="legacy",
-        help="Generator type (legacy [default], 2D, 3D-triplane, 3D-voxel)",
+        choices=GENERATOR_TYPES,
+        help="Generator type",
     )
     parser.add_argument(
         "--act-fun",

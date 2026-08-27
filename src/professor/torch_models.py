@@ -57,7 +57,7 @@ def build_activation(activation_name: str) -> nn.Module:
     if activation_name == "SoftSign":
         activation_name = "Softsign"
 
-    activation_type = getattr(nn, activation_name)
+    activation_type = getattr(nn, activation_name, None)
     if activation_type is None:
         raise Exception(f"Could not find target activation function: {activation_name}")
 
@@ -268,7 +268,7 @@ class Generator2D(nn.Module):
         # Choose starting size
         n_layers = np.log2(im_size) - 1
         if np.floor(n_layers) != n_layers:
-            print("warning: output_size ({im_size}) is not a power of 2")
+            print(f"warning: output_size ({im_size}) is not a power of 2")
         n_layers = int(np.floor(n_layers))
         l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
         first_kernel = (y_kernel, x_kernel)
@@ -559,7 +559,7 @@ class Generator3DSpectral(nn.Module):
 
         n_layers = np.log2(im_size) - 1
         if np.floor(n_layers) != n_layers:
-            print("warning: output_size ({im_size}) is not a power of 2")
+            print(f"warning: output_size ({im_size}) is not a power of 2")
         n_layers = int(np.floor(n_layers))
         out_features = np.minimum(min_features * 2**n_layers, max_features)
         layer_size = (x_kernel, y_kernel, z_kernel)
@@ -668,7 +668,7 @@ class Generator3DVoxel(nn.Module):
 
         n_layers = np.log2(im_size) - 1
         if np.floor(n_layers) != n_layers:
-            print("warning: output_size ({im_size}) is not a power of 2")
+            print(f"warning: output_size ({im_size}) is not a power of 2")
         n_layers = int(np.floor(n_layers))
         out_features = np.minimum(min_features * 2**n_layers, max_features)
         layer_size = (x_kernel, y_kernel, z_kernel)
@@ -1196,6 +1196,7 @@ def build_generator(
     input_size: int = 1,
     im_size: int = 1,
     num_channels: int = 1,
+    intermediate_channels: int = 3,
     min_features: int = 64,
     max_features: int = 512,
     first_layer: nn.Module = nn.Identity(),
@@ -1206,6 +1207,7 @@ def build_generator(
     z_kernel: int = 4,
     act_fun: str = "ReLU",
     upscale_type: str = "transpose",
+    residual: bool = False,
     last_bias: bool = False,
 ) -> nn.Module:
 
@@ -1239,6 +1241,7 @@ def build_generator(
             x_kernel=x_kernel,
             act_fun=act_fun,
             upscale_type=upscale_type,
+            residual=residual,
             last_bias=last_bias,
         )
 
@@ -1247,6 +1250,7 @@ def build_generator(
             input_size,
             im_size,
             num_channels,
+            intermediate_channels=intermediate_channels,
             min_features=min_features,
             max_features=max_features,
             first_layer=first_layer,
@@ -1257,6 +1261,7 @@ def build_generator(
             z_kernel=z_kernel,
             act_fun=act_fun,
             upscale_type=upscale_type,
+            residual=residual,
             last_bias=last_bias,
         )
 
@@ -1276,6 +1281,7 @@ def build_generator(
         #     z_kernel=z_kernel,
         #     act_fun=act_fun,
         #     upscale_type=upscale_type,
+        #     residual=residual,
         #     last_bias=last_bias,
         # )
     elif generator_type == "3D-voxel":
@@ -1293,6 +1299,7 @@ def build_generator(
             z_kernel=z_kernel,
             act_fun=act_fun,
             upscale_type=upscale_type,
+            residual=residual,
             last_bias=last_bias,
         )
     raise Exception(f"Unrecognized generator type: {generator_type}")

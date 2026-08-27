@@ -416,6 +416,7 @@ def main(args: argparse.Namespace) -> None:
         input_size=n_input,
         im_size=n_pixels,
         num_channels=n_models,
+        intermediate_channels=args.intermediate_channels,
         max_features=args.max_feature,
         min_features=args.min_feature,
         first_layer=nn.Identity(),
@@ -425,6 +426,7 @@ def main(args: argparse.Namespace) -> None:
         z_kernel=args.z_kernel,
         act_fun=args.act_fun,
         upscale_type=args.upscale_type,
+        residual=args.residual
     )
 
     if rank == 0:
@@ -517,6 +519,7 @@ def main(args: argparse.Namespace) -> None:
             model_name=model_name,
             checkpoint_path=f"{output_dir}/0000.pt",
             n_channels=n_channels,
+            intermediate_channels=args.intermediate_channels,
             n_inputs=n_input,
             x_pixels=n_pixels_x,
             y_pixels=n_pixels_y,
@@ -530,7 +533,8 @@ def main(args: argparse.Namespace) -> None:
             fields=keys,
             generator_type=args.generator_type,
             act_fun=args.act_fun,
-            upscale_type=args.upscale_type
+            upscale_type=args.upscale_type,
+            residual=args.residual
         )
 
     # try to free up gpu memory
@@ -680,7 +684,7 @@ def main(args: argparse.Namespace) -> None:
                     #     optimizer_complex.consolidate_state_dict()
 
                     if rank == 0:
-                        filepath = f"{output_dir}/{epoch:04d}q"
+                        filepath = f"{output_dir}/{epoch:04d}"
                         state = {"optimizer": optimizer.state_dict()}
                         # if optimizer_complex is not None:
                         #     state["optimizer_complex"] = optimizer_complex.state_dict()
