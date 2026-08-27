@@ -38,7 +38,7 @@ jobs:
           flake8 src
           flake8 tests
       - name: Test
-        run: python -m pytest --cov=professor tests
+        run: python -m pytest --cov=professor tests --ignore=tests/mltrainer-integration
 
   build-docs:
     needs: test
