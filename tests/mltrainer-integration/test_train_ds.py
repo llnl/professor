@@ -6,6 +6,7 @@
 import unittest
 import argparse
 from professor import mltrainer
+from tests.mltrainer_integration_paths import dataset_path
 
 
 class TestEverything(unittest.TestCase):
@@ -22,7 +23,7 @@ class TestEverything(unittest.TestCase):
             min_feature=8,
             restart_model="",
             keys="density,velocity_x,velocity_y",
-            dataset_path='/p/lustre1/jekel1/data/double_sinewave',
+            dataset_path=dataset_path('double_sinewave'),
             dataset_type=1,
             dataset_file='filelist.txt',
             y_kernel=4,

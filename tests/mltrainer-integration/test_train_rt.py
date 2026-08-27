@@ -6,6 +6,7 @@
 import unittest
 import argparse
 from professor import mltrainer
+from tests.mltrainer_integration_paths import dataset_path
 from torchinfo import summary  # noqa F:401
 
 
@@ -23,7 +24,7 @@ class TestEverything(unittest.TestCase):
             min_feature=4,
             restart_model="",
             keys="density,velocity_x,velocity_y,pressure,energy,materials",
-            dataset_path='/p/lustre1/jekel1/data/rayleigh-taylor-single',
+            dataset_path=dataset_path('rayleigh-taylor-single'),
             dataset_type=0,
             dataset_file='filelist.txt',
             y_kernel=3,
