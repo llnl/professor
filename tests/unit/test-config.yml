@@ -1,24 +1,24 @@
 model:
   pytorch:
-    name: Taylor Green Vortex
+    name: Tiny test generator
     checkpoints:
-      - /usr/workspace/prof/models/tg-vortex-analytical/taylor-green-0150.pt
+      - tests/assets/tiny-generator.pt
     devices:
       - 0
     seed: 1231
     dimensions:
       n_inputs: 4
       batch_size: 1
-      y_pixels: 512
-      x_pixels: 512
+      y_pixels: 32
+      x_pixels: 32
     invocation:
       target: professor.torch_models.Generator
       params:
         input_size: ${model.pytorch.dimensions.n_inputs}
         im_size: ${model.pytorch.dimensions.y_pixels}
         num_channels: 1
-        max_features: 1024
-        min_features: 128
+        max_features: 4
+        min_features: 2
         first_layer:
           invocation:
             target: torch.nn.Identity
