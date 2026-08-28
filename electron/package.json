@@ -9,7 +9,7 @@
     "package": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^37.2.6",
+    "electron": "^44.0.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
@@ -31,13 +31,19 @@
       "output": "release"
     },
     "linux": {
-      "target": ["dir"]
+      "target": [
+        "dir"
+      ]
     },
     "mac": {
-      "target": ["dir"]
+      "target": [
+        "dir"
+      ]
     },
     "win": {
-      "target": ["dir"]
+      "target": [
+        "dir"
+      ]
     }
   }
 }
