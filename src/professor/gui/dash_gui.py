@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import tkinter as tk
-from tkinter import filedialog
+# import tkinter as tk
+# from tkinter import filedialog
 
 import dash  # type: ignore
 import dash_bootstrap_components as dbc  # type: ignore
@@ -1068,6 +1068,9 @@ def get_file_path() -> str:
     """
     Request a configuration filename from the user via a pop up search window
     """
+    import tkinter as tk
+    from tkinter import filedialog
+
     # Open the tk window and push it to the top layer
     root = tk.Tk()
     root.withdraw()
