@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import tkinter as tk
+from tkinter import filedialog
+
 import dash  # type: ignore
 import dash_bootstrap_components as dbc  # type: ignore
 import h5py
@@ -901,40 +904,79 @@ def build_navbar() -> dbc.Navbar:
     )
 
 
-def build_load_model_modal(initial_status: Any = None, is_open: bool = False) -> dbc.Modal:
+def build_load_model_modal(initial_status: Any = None, is_open: bool = False, app_type: str = 'local') -> dbc.Modal:
+
+    modal_rows = []
+    if app_type == 'server':
+        modal_rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Upload(
+                            id="config-upload",
+                            children=html.Div(["Drag and drop or select a YAML config or bundle"]),
+                            multiple=False,
+                            className="border rounded p-4 text-center",
+                        ),
+                        md=6,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Input(
+                                id="server-config-path",
+                                type="text",
+                                placeholder="Server-side config path",
+                            ),
+                            dbc.Button("Load Path", id="load-path-button", n_clicks=0, className="mt-2"),
+                        ],
+                        md=6,
+                    ),
+                ],
+                className="g-3",
+            )
+        )
+
+    elif app_type == 'local':
+        modal_rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            dbc.Input(
+                                id="server-config-path",
+                                type="text",
+                                placeholder="Server-side config path",
+                            )
+                        ],
+                        md=6,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Button("Select Model", id="select-path-button", n_clicks=0, className="mt-2"),
+                        ],
+                        md=6,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Button("Load Model", id="load-path-button", n_clicks=0, className="mt-2"),
+                        ],
+                        md=6,
+                    ),
+                ],
+                className="g-3",
+            )
+        )
+
+    else:
+        raise ValueError(f"Unrecognized app type: {app_type}")
+
+
+    modal_rows.append(dbc.Row(html.Div(id="landing-status", className="mt-3", children=initial_status)))
+
     return dbc.Modal(
         [
             dbc.ModalHeader(dbc.ModalTitle("Load Model Config")),
-            dbc.ModalBody(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                dcc.Upload(
-                                    id="config-upload",
-                                    children=html.Div(["Drag and drop or select a YAML config or bundle"]),
-                                    multiple=False,
-                                    className="border rounded p-4 text-center",
-                                ),
-                                md=6,
-                            ),
-                            dbc.Col(
-                                [
-                                    dbc.Input(
-                                        id="server-config-path",
-                                        type="text",
-                                        placeholder="Server-side config path",
-                                    ),
-                                    dbc.Button("Load Path", id="load-path-button", n_clicks=0, className="mt-2"),
-                                ],
-                                md=6,
-                            ),
-                        ],
-                        className="g-3",
-                    ),
-                    html.Div(id="landing-status", className="mt-3", children=initial_status),
-                ],
-            ),
+            dbc.ModalBody(dbc.Container(modal_rows, fluid=True)),
             dbc.ModalFooter(dbc.Button("Close", id="close-load-model-modal", n_clicks=0)),
         ],
         id="load-model-modal",
@@ -1022,7 +1064,29 @@ def build_status(message: str, color: str = "danger") -> dbc.Alert:
     return dbc.Alert(message, color=color, dismissable=True)
 
 
-def build_application(initial_config: str | None = None) -> dash.Dash:
+def get_file_path() -> str:
+    """
+    Request a configuration filename from the user via a pop up search window
+    """
+    # Open the tk window and push it to the top layer
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    root.focus_force()
+
+    # Ask the user for the filename
+    filetypes = [
+        ("Config (*.yml, *.yaml)", "*.yml *.yaml"),
+        ("Archive (*.zip, *.tar, *.tar.gz)", "*.zip *.tar *.tar.gz"),
+        ("All", "*")
+    ]
+    file_path = filedialog.askopenfilename(parent=root, title="Select Target Model", filetypes=filetypes)
+    root.destroy()
+    return file_path
+
+
+def build_application(initial_config: str | None = None,
+                      app_type: str = 'local') -> dash.Dash:
     """
     Build the plotly Dash application.
     """
@@ -1052,7 +1116,7 @@ def build_application(initial_config: str | None = None) -> dash.Dash:
                 dcc.Store(id="active-model", storage_type="memory", data=active_payload),
                 dcc.Download(id="download-file"),
                 build_navbar(),
-                build_load_model_modal(initial_status, is_open=initial_config is None),
+                build_load_model_modal(initial_status, is_open=initial_config is None, app_type=app_type),
                 html.Div(id="visualization-container", children=initial_panel),
             ],
         )
@@ -1074,43 +1138,87 @@ def build_application(initial_config: str | None = None) -> dash.Dash:
             return False
         return is_open
 
-    @app.callback(
-        Output("active-model", "data"),
-        Output("visualization-container", "children"),
-        Output("landing-status", "children"),
-        Input("config-upload", "contents"),
-        Input("load-path-button", "n_clicks"),
-        State("config-upload", "filename"),
-        State("server-config-path", "value"),
-        State("session-id", "data"),
-        State("active-model", "data"),
-        prevent_initial_call=True,
-    )
-    def load_config(
-        upload_contents: str | None,
-        n_clicks: int,
-        upload_filename: str | None,
-        server_config_path: str | None,
-        session_id: str,
-        active_payload: dict[str, Any] | None,
-    ):
-        triggered_id = dash.ctx.triggered_id
-        try:
-            if triggered_id == "config-upload":
-                if upload_contents is None or upload_filename is None:
-                    raise ValueError("No uploaded config was provided.")
-                payload = build_config_payload_from_upload(upload_contents, upload_filename, session_id)
-            else:
+    if app_type == "server":
+        @app.callback(
+            Output("active-model", "data"),
+            Output("visualization-container", "children"),
+            Output("landing-status", "children"),
+            Input("config-upload", "contents"),
+            Input("load-path-button", "n_clicks"),
+            State("config-upload", "filename"),
+            State("server-config-path", "value"),
+            State("session-id", "data"),
+            State("active-model", "data"),
+            prevent_initial_call=True,
+        )
+        def load_config(
+            upload_contents: str | None,
+            n_clicks: int,
+            upload_filename: str | None,
+            server_config_path: str | None,
+            session_id: str,
+            active_payload: dict[str, Any] | None,
+        ):
+            triggered_id = dash.ctx.triggered_id
+            try:
+                if triggered_id == "config-upload":
+                    if upload_contents is None or upload_filename is None:
+                        raise ValueError("No uploaded config was provided.")
+                    payload = build_config_payload_from_upload(upload_contents, upload_filename, session_id)
+                else:
+                    if not server_config_path:
+                        raise ValueError("Enter a server-side config path before loading.")
+                    payload = build_config_payload_from_path(server_config_path, session_id)
+            except Exception as exc:  # noqa: BLE001
+                return dash.no_update, dash.no_update, build_status(str(exc))
+
+            if active_payload is not None:
+                result_cache.release_instance(active_payload["instance_id"])
+                model_cache.release_session(session_id)
+            return payload, build_model_panel(payload), build_status(f"Loaded {payload['source']}", color="success")
+
+    elif app_type == "local":
+        @app.callback(
+            Output("server-config-path", "value"),
+            Input("select-path-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def select_config_path(
+            n_clicks: int,
+        ):
+            return get_file_path()
+
+        @app.callback(
+            Output("active-model", "data"),
+            Output("visualization-container", "children"),
+            Output("landing-status", "children"),
+            Input("load-path-button", "n_clicks"),
+            State("server-config-path", "value"),
+            State("session-id", "data"),
+            State("active-model", "data"),
+            prevent_initial_call=True,
+        )
+        def load_config(
+            n_clicks: int,
+            server_config_path: str | None,
+            session_id: str,
+            active_payload: dict[str, Any] | None,
+        ):
+            try:
                 if not server_config_path:
                     raise ValueError("Enter a server-side config path before loading.")
                 payload = build_config_payload_from_path(server_config_path, session_id)
-        except Exception as exc:  # noqa: BLE001
-            return dash.no_update, dash.no_update, build_status(str(exc))
+            except Exception as exc:  # noqa: BLE001
+                return dash.no_update, dash.no_update, build_status(str(exc))
 
-        if active_payload is not None:
-            result_cache.release_instance(active_payload["instance_id"])
-            model_cache.release_session(session_id)
-        return payload, build_model_panel(payload), build_status(f"Loaded {payload['source']}", color="success")
+            if active_payload is not None:
+                result_cache.release_instance(active_payload["instance_id"])
+                model_cache.release_session(session_id)
+            return payload, build_model_panel(payload), build_status(f"Loaded {payload['source']}", color="success")
+
+    else:
+        raise ValueError(f"Unrecognized app type: {app_type}")
+
 
     @app.callback(
         Output({"type": "model-results", "instance_id": MATCH}, "data"),
@@ -1272,6 +1380,13 @@ def main() -> None:
         help="Target port",
     )
     parser.add_argument(
+            "--app-type",
+            default="local",
+            type=str,
+            choices=("local", "server"),
+            help="Application type",
+        )
+    parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
@@ -1279,7 +1394,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    app = build_application(args.config)
+    app = build_application(args.config, args.app_type)
     app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 
 
