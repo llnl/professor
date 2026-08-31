@@ -9,8 +9,9 @@ let splashWindow;
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
-    width: 836,
-    height: 260,
+    // Note: these are oversized to prevent scrollbars from appearing
+    width: 900,
+    height: 300,
     frame: false,
     resizable: false,
     show: false,
