@@ -11,10 +11,18 @@
       html,
       body {
         margin: 0;
-        width: 100%;
-        height: 100%;
+        position: fixed;
+        inset: 0;
         overflow: hidden;
         background: transparent;
+        scrollbar-width: none;
+      }
+
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
       }
 
       img {
@@ -22,6 +30,7 @@
         width: 100%;
         height: 100%;
         object-fit: contain;
+        user-select: none;
       }
     </style>
   </head>
