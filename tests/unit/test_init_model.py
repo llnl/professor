@@ -33,6 +33,7 @@ def model_mock(mocker):
 
 def test_init_patch(model_mock):
     assert model_mock is not None
+    assert model_mock.models[-1].image.shape == (1, 1, 32, 32)
 
 
 def test_load_cfg(model_mock):

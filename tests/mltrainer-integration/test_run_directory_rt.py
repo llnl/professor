@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import os
+import shutil
 import unittest
 import argparse
 from professor import mltrainer
+from tests.mltrainer_integration_paths import dataset_path
 from torchinfo import summary  # noqa F:401
 
 mypath = '/tmp/test-run'
@@ -15,7 +17,7 @@ class TestEverything(unittest.TestCase):
 
     def test_prof_train_rt_run_directory(self):
         if os.path.exists(mypath):
-            os.rmdir(mypath)
+            shutil.rmtree(mypath)
         os.mkdir(mypath)
 
         args = argparse.Namespace(
@@ -29,7 +31,7 @@ class TestEverything(unittest.TestCase):
             min_feature=8,
             restart_model="",
             keys="density,velocity_x,velocity_y,pressure,energy,materials",
-            dataset_path='/p/lustre1/jekel1/data/rayleigh-taylor-single',
+            dataset_path=dataset_path('rayleigh-taylor-single'),
             dataset_type=0,
             dataset_file='filelist.txt',
             y_kernel=3,
@@ -57,7 +59,7 @@ class TestEverything(unittest.TestCase):
             min_feature=8,
             restart_model="",
             keys="density,velocity_x,velocity_y,pressure,energy,materials",
-            dataset_path='/p/lustre1/jekel1/data/rayleigh-taylor-single',
+            dataset_path=dataset_path('rayleigh-taylor-single'),
             dataset_type=0,
             dataset_file='filelist.txt',
             y_kernel=3,

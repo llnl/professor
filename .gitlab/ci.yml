@@ -1,0 +1,79 @@
+variables:
+  PYTHON_ENVIRONMENT_PATH: /usr/workspace/${GITLAB_USER_LOGIN}/.mlvenv_professor_dev
+  LLNL_FLUX_SCHEDULER_PARAMETERS: -N 1 -t 10 --queue pci
+
+stages:
+  - environment
+  - build
+  - docs
+  - test
+
+configure_python:
+  tags:
+    - shell
+    - tioga
+  stage: environment
+  script:
+    - ./createvenv-for-ci.sh
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /^Draft/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build:
+  tags:
+    - shell
+    - tioga
+  stage: build
+  before_script:
+    - source ${PYTHON_ENVIRONMENT_PATH}/bin/activate
+  script:
+    - flake8 src
+    - flake8 tests
+    - python -m pip install -e .[dev] --no-build-isolation
+    - python -m pip install -e plugins/analytical
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /^Draft/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test:
+  tags:
+    - batch
+    - tioga
+  stage: test
+  before_script:
+    - module load rocm/7.2.1
+    - source ${PYTHON_ENVIRONMENT_PATH}/bin/activate
+  script:
+    - flux run -N 1 -n 1 python -m pytest --cov=professor tests
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /^Draft/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+include:
+  - project: 'lc-templates/id_tokens'
+    file: 'id_tokens.yml'
+
+pages:
+  stage: docs
+  tags:
+    - shell
+    - tioga
+  before_script:
+    - source ${PYTHON_ENVIRONMENT_PATH}/bin/activate
+  script:
+    - echo "The site will be deployed to $CI_PAGES_URL"
+    - git submodule init
+    - git submodule update
+    - mkdocs build
+    - mv site public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
