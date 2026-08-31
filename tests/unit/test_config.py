@@ -57,7 +57,13 @@ class TestDimensionsSchema:
         DimensionsSchema(dimensions_conf)
 
     def test_missing_keys(self, dimensions_conf):
-        for key in dimensions_conf.keys():
+        required_keys = (
+            Keys.N_INPUTS.value,
+            Keys.BATCH_SIZE.value,
+            Keys.Y_PIXELS.value,
+            Keys.X_PIXELS.value,
+        )
+        for key in required_keys:
             copy = dimensions_conf.copy()
             copy.pop(key, None)
             with pytest.raises(SchemaMissingKeyError):
@@ -71,6 +77,11 @@ class TestDimensionsSchema:
                 DimensionsSchema(copy)
 
     def test_val_set(self, dimensions_conf):
+        expected = dimensions_conf | {Keys.Z_PIXELS.value: 1}
+        assert DimensionsSchema(dimensions_conf).val == expected
+
+    def test_explicit_z_pixels(self, dimensions_conf):
+        dimensions_conf[Keys.Z_PIXELS.value] = 16
         assert DimensionsSchema(dimensions_conf).val == dimensions_conf
 
 
