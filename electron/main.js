@@ -5,6 +5,27 @@ const path = require("path");
 
 let dashProcess;
 let mainWindow;
+let splashWindow;
+
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 836,
+    height: 260,
+    frame: false,
+    resizable: false,
+    show: false,
+    transparent: true,
+  });
+  splashWindow.once("ready-to-show", () => splashWindow.show());
+  splashWindow.loadFile(path.join(__dirname, "splash.html"));
+}
+
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+}
 
 function dashArguments() {
   // Electron itself consumes the first arguments in development mode.
@@ -81,6 +102,7 @@ async function createWindow() {
   try {
     await waitForServer(port, dashProcess);
   } catch (error) {
+    closeSplashWindow();
     dialog.showErrorBox("Professor Dash GUI", `${error.message}\n\nExecutable: ${executable}`);
     app.quit();
     return;
@@ -91,15 +113,27 @@ async function createWindow() {
     height: 1000,
     minWidth: 900,
     minHeight: 700,
+    show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  try {
+    await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+    mainWindow.show();
+    closeSplashWindow();
+  } catch (error) {
+    closeSplashWindow();
+    dialog.showErrorBox("Professor Dash GUI", `The Dash page could not be loaded.\n\n${error.message}`);
+    app.quit();
+  }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createSplashWindow();
+  return createWindow();
+});
 
 app.on("window-all-closed", () => app.quit());
 
