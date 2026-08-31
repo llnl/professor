@@ -399,10 +399,20 @@ class FullSchema(VelaSchema):
 class Config:
     def __init__(self, cfgpath: str) -> None:
         conf = self._load_cfg(cfgpath)
+        self._init_from_conf(conf, source=cfgpath)
+
+    @classmethod
+    def from_text(cls, text: str, source: str = "<memory>") -> "Config":
+        instance = cls.__new__(cls)
+        conf = OmegaConf.create(text)
+        instance._init_from_conf(conf, source=source)
+        return instance
+
+    def _init_from_conf(self, conf: Any, source: str) -> None:
         self.conf = conf
         dict_conf = OmegaConf.to_container(conf, resolve=True)
         self.dict_conf = dict_conf
-        logger.debug(f"Loading config from path: {cfgpath}")
+        logger.debug(f"Loading config from: {source}")
 
         full = FullSchema(dict_conf).val  # type: ignore
         if full is None:
