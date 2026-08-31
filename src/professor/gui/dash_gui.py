@@ -904,10 +904,10 @@ def build_navbar() -> dbc.Navbar:
     )
 
 
-def build_load_model_modal(initial_status: Any = None, is_open: bool = False, app_type: str = 'local') -> dbc.Modal:
+def build_load_model_modal(initial_status: Any = None, is_open: bool = False, app_type: str = "local") -> dbc.Modal:
 
     modal_rows = []
-    if app_type == 'server':
+    if app_type == "server":
         modal_rows.append(
             dbc.Row(
                 [
@@ -936,7 +936,7 @@ def build_load_model_modal(initial_status: Any = None, is_open: bool = False, ap
             )
         )
 
-    elif app_type == 'local':
+    elif app_type == "local":
         modal_rows.append(
             dbc.Row(
                 [
@@ -969,7 +969,6 @@ def build_load_model_modal(initial_status: Any = None, is_open: bool = False, ap
 
     else:
         raise ValueError(f"Unrecognized app type: {app_type}")
-
 
     modal_rows.append(dbc.Row(html.Div(id="landing-status", className="mt-3", children=initial_status)))
 
@@ -1074,22 +1073,21 @@ def get_file_path() -> str:
     # Open the tk window and push it to the top layer
     root = tk.Tk()
     root.withdraw()
-    root.attributes('-topmost', True)
+    root.attributes("-topmost", True)
     root.focus_force()
 
     # Ask the user for the filename
     filetypes = [
         ("Config (*.yml, *.yaml)", "*.yml *.yaml"),
         ("Archive (*.zip, *.tar, *.tar.gz)", "*.zip *.tar *.tar.gz"),
-        ("All", "*")
+        ("All", "*"),
     ]
     file_path = filedialog.askopenfilename(parent=root, title="Select Target Model", filetypes=filetypes)
     root.destroy()
     return file_path
 
 
-def build_application(initial_config: str | None = None,
-                      app_type: str = 'local') -> dash.Dash:
+def build_application(initial_config: str | None = None, app_type: str = "local") -> dash.Dash:
     """
     Build the plotly Dash application.
     """
@@ -1142,6 +1140,7 @@ def build_application(initial_config: str | None = None,
         return is_open
 
     if app_type == "server":
+
         @app.callback(
             Output("active-model", "data"),
             Output("visualization-container", "children"),
@@ -1181,6 +1180,7 @@ def build_application(initial_config: str | None = None,
             return payload, build_model_panel(payload), build_status(f"Loaded {payload['source']}", color="success")
 
     elif app_type == "local":
+
         @app.callback(
             Output("server-config-path", "value"),
             Input("select-path-button", "n_clicks"),
@@ -1221,7 +1221,6 @@ def build_application(initial_config: str | None = None,
 
     else:
         raise ValueError(f"Unrecognized app type: {app_type}")
-
 
     @app.callback(
         Output({"type": "model-results", "instance_id": MATCH}, "data"),
@@ -1383,12 +1382,12 @@ def main() -> None:
         help="Target port",
     )
     parser.add_argument(
-            "--app-type",
-            default="local",
-            type=str,
-            choices=("local", "server"),
-            help="Application type",
-        )
+        "--app-type",
+        default="local",
+        type=str,
+        choices=("local", "server"),
+        help="Application type",
+    )
     parser.add_argument(
         "--debug",
         action="store_true",
