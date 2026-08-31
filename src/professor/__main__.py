@@ -143,11 +143,11 @@ def prof_trainer() -> None:
     )
     parser.add_argument("--residual", action="store_true", help="Use residual layers in the model.")
     parser.add_argument(
-            "--intermediate-channels",
-            type=int,
-            default=3,
-            help="Number of intermediate channels to use prior to 3D triplane reconstruction",
-        )
+        "--intermediate-channels",
+        type=int,
+        default=3,
+        help="Number of intermediate channels to use prior to 3D triplane reconstruction",
+    )
     parser.add_argument(
         "--generator-type",
         type=str,

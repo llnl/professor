@@ -6,7 +6,6 @@ import torch
 from typing import Optional, Union, Dict, Any, Sequence
 
 
-
 def consolidated_loss(
     pred: torch.Tensor,
     target: torch.Tensor,

@@ -426,7 +426,7 @@ def main(args: argparse.Namespace) -> None:
         z_kernel=args.z_kernel,
         act_fun=args.act_fun,
         upscale_type=args.upscale_type,
-        residual=args.residual
+        residual=args.residual,
     )
 
     if rank == 0:
@@ -534,7 +534,7 @@ def main(args: argparse.Namespace) -> None:
             generator_type=args.generator_type,
             act_fun=args.act_fun,
             upscale_type=args.upscale_type,
-            residual=args.residual
+            residual=args.residual,
         )
 
     # try to free up gpu memory

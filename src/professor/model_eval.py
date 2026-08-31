@@ -102,10 +102,10 @@ def render_model_evaluation_cases(
     output_dir = Path(output_path).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with torch.no_grad(), open(os.path.join(output_dir, 'params.csv'), 'w') as record_file:
+    with torch.no_grad(), open(os.path.join(output_dir, "params.csv"), "w") as record_file:
         cases = zip(selected_case_ids, loader)
         for case_id, (inputs, observed) in tqdm(cases, total=N, desc="Rendering cases"):
-            record_file.write(','.join([str(x) for x in inputs]) + '\n')
+            record_file.write(",".join([str(x) for x in inputs]) + "\n")
             inputs = inputs.to(device)
             if cfg.half_precision:
                 inputs = inputs.half()
