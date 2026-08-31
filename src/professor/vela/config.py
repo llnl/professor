@@ -37,6 +37,7 @@ class Keys(Enum):
     BATCH_SIZE = "batch_size"
     Y_PIXELS = "y_pixels"
     X_PIXELS = "x_pixels"
+    Z_PIXELS = "z_pixels"
     INVOCATION = "invocation"
     TARGET = "target"
     PARAMS = "params"
@@ -154,6 +155,7 @@ class DimensionsSchema(VelaSchema):
                 Keys.BATCH_SIZE.value: int,
                 Keys.Y_PIXELS.value: int,
                 Keys.X_PIXELS.value: int,
+                Optional(Keys.Z_PIXELS.value, default=1): int,
             }
         )
 
@@ -193,7 +195,7 @@ class _InvocationSchema(Schema):
             data[Keys.PARAMS.value]["last_layer"] = {
                 Keys.INVOCATION.value: {
                     Keys.TARGET.value: "professor.layers.AlphaLinear",
-                    Keys.PARAMS.value: {"n_channels": data[Keys.PARAMS.value]["num_channels"]},
+                    Keys.PARAMS.value: {"n_channels": data[Keys.PARAMS.value]["num_channels"], "n_dims": 2},
                 }
             }
 
@@ -479,6 +481,9 @@ class Config:
         self.x_pixels: int = self.dimensions[Keys.X_PIXELS.value]
         logger.debug(f"{Keys.X_PIXELS.value}: {self.x_pixels}")
 
+        self.z_pixels: int = self.dimensions[Keys.Z_PIXELS.value]
+        logger.debug(f"{Keys.Z_PIXELS.value}: {self.z_pixels}")
+
         self.invocation: Dict[str, Any] = self.model[Keys.INVOCATION.value]
         logger.debug(f"{Keys.INVOCATION.value}: {self.invocation}")
 
@@ -637,12 +642,20 @@ def build_template_config(
     checkpoint_path: str = "0000.pt",
     n_inputs: int = 1,
     n_channels: int = 1,
+    intermediate_channels: int = 3,
     x_pixels: int = 512,
     y_pixels: int = 512,
+    z_pixels: int = 1,
     min_features: int = 128,
     max_features: int = 1024,
     x_kernel: int = 4,
     y_kernel: int = 4,
+    z_kernel: int = 0,
+    generator_type: str = "legacy",
+    act_fun: str = "ReLU",
+    upscale_type: str = "transpose",
+    residual: bool = False,
+    fields: list[str] = ["field"],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
 ) -> None:
     """
@@ -656,6 +669,24 @@ def build_template_config(
     dims["n_inputs"] = n_inputs
     dims["x_pixels"] = x_pixels
     dims["y_pixels"] = y_pixels
+    if z_pixels:
+        dims["z_pixels"] = z_pixels
+
+    available_generators = {
+        "legacy": "professor.torch_models.Generator",
+        "2D": "professor.torch_models.Generator2D",
+        "3D-triplane": "professor.torch_models.Generator3DTriplane",
+        "3D-spectral": "professor.torch_models.Generator3DSpectral",
+        "3D-voxel": "professor.torch_models.Generator3DVoxel",
+    }
+    conf["model"]["pytorch"]["invocation"]["target"] = available_generators[generator_type]
+
+    if "3D" in generator_type:
+        conf["model"]["pytorch"]["invocation"]["params"]["last_layer"]["invocation"]["params"]["n_dims"] = 3
+
+    # Note: some layers in this model type do not support half precision
+    if generator_type == "3D-spectral":
+        conf["model"]["pytorch"]["execution"]["half_precision"] = False
 
     params = conf["model"]["pytorch"]["invocation"]["params"]
     params["num_channels"] = n_channels
@@ -663,6 +694,17 @@ def build_template_config(
     params["max_features"] = max_features
     params["x_kernel"] = x_kernel
     params["y_kernel"] = y_kernel
+    params["act_fun"] = act_fun
+
+    if z_kernel:
+        params["z_kernel"] = z_kernel
+
+    if generator_type in ["2D", "3D-triplane", "3D-spectral", "3D-voxel"]:
+        params["upscale_type"] = upscale_type
+        params["residual"] = residual
+        params["intermediate_channels"] = intermediate_channels
+
+    conf["gui"]["napari"]["fields"] = fields
 
     sliders = conf["gui"]["napari"]["sliders"]
     for param_name, param_min, param_max in input_parameters:

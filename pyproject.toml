@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Professor - A Machine Learning Visualization Library"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "torch>=1.12.1",
     "torchvision",
@@ -63,6 +63,7 @@ dev = [
 
 [project.scripts]
 prof-trainer = "professor.__main__:prof_trainer"
+prof-eval = "professor.model_eval:prof_eval"
 
 [project.gui-scripts]
 prof-vis = "professor.vela.__main__:main"

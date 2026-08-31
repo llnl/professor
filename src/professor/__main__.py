@@ -2,8 +2,30 @@
 # contributors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-import professor
 import argparse
+import professor
+
+
+GENERATOR_ACTIVATION_FUNCTIONS = (
+    "ReLU",
+    "Tanh",
+    "Softplus",
+    "SoftSign",
+    "Mish",
+    "SiLU",
+    "GELU",
+    "CELU",
+    "LeakyReLU",
+    "ELU",
+)
+
+GENERATOR_TYPES = (
+    "legacy",
+    "2D",
+    "3D-triplane",
+    "3D-voxel",
+    # "3D-spectral"
+)
 
 
 def prof_trainer() -> None:
@@ -96,16 +118,49 @@ def prof_trainer() -> None:
         help="The plaintext filelist of all of the hdf5 files. This should be located in the `datset_path`.",
     )
     parser.add_argument(
+        "--x_kernel",
+        type=int,
+        default=1,
+        help="Number of x pixels in the first representation of the model.",
+    )
+    parser.add_argument(
         "--y_kernel",
         type=int,
         default=3,
         help="Number of y pixels in the first representation of the model.",
     )
     parser.add_argument(
-        "--x_kernel",
+        "--z_kernel",
         type=int,
         default=1,
-        help="Number of x pixels in the first representation of the model.",
+        help="Number of z pixels in the first representation of the model.",
+    )
+    parser.add_argument(
+        "--upscale-type",
+        type=str,
+        default="transpose",
+        help="Data upscaling method (transpose, nearest, linear)",
+    )
+    parser.add_argument("--residual", action="store_true", help="Use residual layers in the model.")
+    parser.add_argument(
+        "--intermediate-channels",
+        type=int,
+        default=3,
+        help="Number of intermediate channels to use prior to 3D triplane reconstruction",
+    )
+    parser.add_argument(
+        "--generator-type",
+        type=str,
+        default="legacy",
+        choices=GENERATOR_TYPES,
+        help="Generator type",
+    )
+    parser.add_argument(
+        "--act-fun",
+        type=str,
+        default="ReLU",
+        choices=GENERATOR_ACTIVATION_FUNCTIONS,
+        help="Activation function to use in the generator.",
     )
     parser.add_argument(
         "--dataloader_workers",

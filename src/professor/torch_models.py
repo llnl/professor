@@ -8,7 +8,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torchlayers.upsample import ConvPixelShuffle  # type: ignore[import-untyped]
-from typing import cast, Dict
+from typing import cast, Dict, Iterable
+from professor.layers import UpscaleBlock2D, UpscaleBlock3D, UpscaleBlock3DSpectral
 
 
 class RB(nn.Module):
@@ -26,6 +27,44 @@ def weights_init(m: nn.Module) -> None:
     elif classname.find("BatchNorm") != -1:
         nn.init.normal_(cast(torch.Tensor, m.weight.data), 1.0, 0.02)
         nn.init.constant_(cast(torch.Tensor, m.bias.data), 0)
+
+
+def _build_middle_layer_schedule(
+    im_size: int, input_size: Iterable[int], input_features: int, min_features: int
+) -> tuple[list[int], list[int], list[int]]:
+    """
+    Helper function to build input features, output features, and current size for
+    the middle layers of a network
+    """
+    min_axis = min(input_size)
+    n_layers = int(np.ceil(np.log2(im_size // (2 * min_axis))))
+
+    f_back = [min(input_features, min_features * 2**ii) for ii in range(n_layers + 1)]
+    f_back[-1] = input_features
+    f_forward = f_back[::-1]
+    layer_input_features = f_forward[:-1]
+    layer_output_features = f_forward[1:]
+    layer_min_axis = [min_axis * 2**ii for ii in range(n_layers)]
+
+    return layer_input_features, layer_output_features, layer_min_axis
+
+
+def build_activation(activation_name: str) -> nn.Module:
+    """
+    Build an instance of an activation layer by name
+    """
+    if activation_name == "SoftSign":
+        activation_name = "Softsign"
+
+    activation_type = getattr(nn, activation_name, None)
+    if activation_type is None:
+        raise Exception(f"Could not find target activation function: {activation_name}")
+
+    kwargs = {}
+    if activation_name in ["ReLU", "Mish", "SiLU", "SELU", "LeakyReLU", "ELU"]:
+        kwargs["inplace"] = True
+
+    return activation_type(**kwargs)
 
 
 class GeneratorTwo(nn.Module):
@@ -205,6 +244,83 @@ class Generator(nn.Module):
         return self.main(input)
 
 
+class Generator2D(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        act_fun: str = "ReLU",
+        upscale_type: str = "nearest",
+        residual: bool = False,
+        last_bias: bool = False,
+    ) -> None:
+        super().__init__()
+
+        # Choose starting size
+        n_layers = np.log2(im_size) - 1
+        if np.floor(n_layers) != n_layers:
+            print(f"warning: output_size ({im_size}) is not a power of 2")
+        n_layers = int(np.floor(n_layers))
+        l1_out_features = np.minimum(min_features * 2**n_layers, max_features)
+        first_kernel = (y_kernel, x_kernel)
+
+        # Build the first layers
+        layers: list[nn.Module] = [first_layer]
+        reshape_layers: list[nn.Module] = [
+            nn.ConvTranspose2d(input_size, l1_out_features, first_kernel, 1, 0, bias=False)
+        ]
+        if use_batch_norm:
+            reshape_layers.append(nn.BatchNorm2d(l1_out_features))
+        reshape_layers.append(build_activation(act_fun))
+        layers.append(nn.Sequential(*reshape_layers))
+
+        # Build middle layers
+        upscale_kernel_size = 3
+        if upscale_type == "transpose":
+            upscale_kernel_size = 4
+
+        layer_defs = _build_middle_layer_schedule(im_size, first_kernel, l1_out_features, min_features)
+        for in_features, out_features, _ in zip(*layer_defs):
+            layers.append(
+                UpscaleBlock2D(
+                    in_features,
+                    out_features,
+                    kernel_size=upscale_kernel_size,
+                    bias=False,
+                    batch_norm=use_batch_norm,
+                    upscale_type=upscale_type,
+                    activation_function=build_activation(act_fun),
+                    residual=residual,
+                )
+            )
+
+        layers.append(
+            UpscaleBlock2D(
+                min_features,
+                num_channels,
+                kernel_size=upscale_kernel_size,
+                bias=last_bias,
+                batch_norm=False,
+                upscale_type=upscale_type,
+                residual=False,
+            )
+        )
+        layers.append(last_layer)
+
+        self.main: nn.Sequential = nn.Sequential(*layers)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return self.main(input)
+
+
 class Generator3D(nn.Module):
     def __init__(
         self,
@@ -219,9 +335,13 @@ class Generator3D(nn.Module):
         z_kernel: int = 4,
         y_kernel: int = 4,
         x_kernel: int = 4,
+        upscale_type: str = "nearest",
         act_fun: str = "ReLU",
         last_bias: bool = False,
     ) -> None:
+        """
+        Generator that uses a dense 3D generator to estimate a 3D field.
+        """
         super(Generator3D, self).__init__()
         self.activation_functions: Dict[str, nn.Module] = {
             "ReLU": nn.ReLU(inplace=True),
@@ -301,6 +421,324 @@ class Generator3D(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return self.main(input)
+
+
+class Generator3DTriplane(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        intermediate_channels: int = 3,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        z_kernel: int = 4,
+        upscale_type: str = "nearest",
+        residual: bool = False,
+        act_fun: str = "ReLU",
+        last_bias: bool = False,
+    ) -> None:
+        """
+        Generator that uses three 2D child generators and a
+        fully-connected reconstruction network to estimate a 3D field.
+        """
+        super(Generator3DTriplane, self).__init__()
+
+        if intermediate_channels == 0:
+            intermediate_channels = num_channels
+
+        # Note: we are forwarding all arguments to the child generators except for the last layer
+        self.generator_x: Generator2D = Generator2D(
+            input_size,
+            im_size,
+            intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=z_kernel,
+            x_kernel=y_kernel,
+            upscale_type=upscale_type,
+            act_fun=act_fun,
+            last_bias=last_bias,
+            residual=residual,
+        )
+        self.generator_y: Generator2D = Generator2D(
+            input_size,
+            im_size,
+            intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=z_kernel,
+            x_kernel=x_kernel,
+            upscale_type=upscale_type,
+            act_fun=act_fun,
+            last_bias=last_bias,
+            residual=residual,
+        )
+        self.generator_z: Generator2D = Generator2D(
+            input_size,
+            im_size,
+            intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            upscale_type=upscale_type,
+            act_fun=act_fun,
+            last_bias=last_bias,
+            residual=residual,
+        )
+
+        self.reconstruction_layers = nn.Sequential(
+            nn.Conv3d(
+                in_channels=3 * intermediate_channels,
+                out_channels=3 * intermediate_channels,
+                kernel_size=(3, 3, 3),
+                padding="same",
+            ),
+            nn.BatchNorm3d(3 * intermediate_channels),
+            build_activation(act_fun),
+            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=num_channels, kernel_size=1),
+            nn.BatchNorm3d(num_channels),
+            build_activation(act_fun),
+        )
+        self.last_layer = last_layer
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # Evaluate the three generators to get tensors of size
+        # [B, C, Y, Z], [B, C, X, Z], and [B, C, X, Y]
+        x = self.generator_x(input).unsqueeze(2)
+        y = self.generator_y(input).unsqueeze(3)
+        z = self.generator_z(input).unsqueeze(4)
+
+        # Broadcast tensors to common shape of [B, C, X, Y, Z]
+        Nb, Nc, _, Ny, Nz = x.shape
+        _, _, Nx, _, _ = y.shape
+        bx = torch.broadcast_to(x, (Nb, Nc, Nx, Ny, Nz))
+        by = torch.broadcast_to(y, (Nb, Nc, Nx, Ny, Nz))
+        bz = torch.broadcast_to(z, (Nb, Nc, Nx, Ny, Nz))
+
+        a = torch.cat([bx, by, bz], dim=1)  # shape: (Nb, 3*Nc, Nx, Ny, Nz)
+        b = self.reconstruction_layers(a)
+        return self.last_layer(b)
+
+
+class Generator3DSpectral(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        z_kernel: int = 4,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        n_modes: int = 8,
+        upscale_type: str = "nearest",
+        residual: bool = False,
+        act_fun: str = "ReLU",
+        last_bias: bool = False,
+    ) -> None:
+        """
+        Generator that uses a dense 3D generator to estimate a 3D field.
+        """
+        super(Generator3DSpectral, self).__init__()
+        self.use_batch_norm: bool = use_batch_norm
+        self.first_layer: nn.Module = first_layer
+        self.last_layer: nn.Module = last_layer
+
+        n_layers = np.log2(im_size) - 1
+        if np.floor(n_layers) != n_layers:
+            print(f"warning: output_size ({im_size}) is not a power of 2")
+        n_layers = int(np.floor(n_layers))
+        out_features = np.minimum(min_features * 2**n_layers, max_features)
+        layer_size = (x_kernel, y_kernel, z_kernel)
+
+        # Build first layers
+        layers: list[nn.Module] = [self.first_layer]
+        # Use seperable convlolutions for the first layers to limit the total mult-ads
+        # reshape_layers: list[nn.Module] = [
+        #     nn.ConvTranspose3d(input_size, out_features, layer_size, 1, 0, bias=False)
+        # ]
+        reshape_features = min(out_features, 3 * input_size)
+        reshape_layers: list[nn.Module] = [
+            nn.ConvTranspose3d(input_size, reshape_features, (x_kernel, 1, 1), 1, 0, bias=False),
+            nn.ConvTranspose3d(reshape_features, reshape_features, (1, y_kernel, 1), 1, 0, bias=False),
+            nn.ConvTranspose3d(reshape_features, reshape_features, (1, 1, z_kernel), 1, 0, bias=False),
+            nn.ConvTranspose3d(reshape_features, out_features, (1, 1, 1), 1, 0, bias=False),
+        ]
+        if use_batch_norm:
+            reshape_layers.append(nn.BatchNorm3d(out_features))
+        reshape_layers.append(build_activation(act_fun))
+        layers.append(nn.Sequential(*reshape_layers))
+
+        # Build middle layers
+        upscale_kernel_size = 3
+        if upscale_type == "transpose":
+            upscale_kernel_size = 4
+
+        layer_defs = _build_middle_layer_schedule(im_size, layer_size, out_features, min_features)
+        for in_features, out_features, min_axis in zip(*layer_defs):
+            if min_axis >= 32:
+                # Limit the number of modes for small images
+                axis_modes = min(min_axis // 16, n_modes)
+                layers.append(
+                    UpscaleBlock3DSpectral(
+                        in_features,
+                        out_features,
+                        num_modes=(axis_modes, axis_modes, axis_modes),
+                        upscale_factor=2,
+                        batch_norm=self.use_batch_norm,
+                        upscale_type=upscale_type,
+                        activation_function=build_activation(act_fun),
+                        residual=residual,
+                    )
+                )
+            else:
+                layers.append(
+                    UpscaleBlock3D(
+                        in_features,
+                        out_features,
+                        kernel_size=upscale_kernel_size,
+                        upscale_factor=2,
+                        batch_norm=self.use_batch_norm,
+                        upscale_type=upscale_type,
+                        activation_function=build_activation(act_fun),
+                        residual=residual,
+                    )
+                )
+
+        # Build the final layers
+        layers.append(
+            UpscaleBlock3DSpectral(
+                min_features,
+                num_channels,
+                num_modes=(n_modes, n_modes, n_modes),
+                upscale_factor=2,
+                upscale_type=upscale_type,
+                bias=last_bias,
+                residual=False,
+            )
+        )
+
+        layers.append(self.last_layer)
+        self.main: nn.Sequential = nn.Sequential(*layers)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x = torch.reshape(input, (input.shape[0], input.shape[1], 1, 1, 1))
+        return self.main(x)
+
+
+class Generator3DVoxel(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        im_size: int,
+        num_channels: int,
+        min_features: int = 64,
+        max_features: int = 512,
+        first_layer: nn.Module = nn.Identity(),
+        last_layer: nn.Module = nn.Tanh(),
+        use_batch_norm: bool = True,
+        z_kernel: int = 4,
+        y_kernel: int = 4,
+        x_kernel: int = 4,
+        upscale_type: str = "nearest",
+        residual: bool = False,
+        act_fun: str = "ReLU",
+        last_bias: bool = False,
+    ) -> None:
+        """
+        Generator that uses a dense 3D generator to estimate a 3D field.
+        """
+        super().__init__()
+        self.use_batch_norm: bool = use_batch_norm
+        self.first_layer: nn.Module = first_layer
+        self.last_layer: nn.Module = last_layer
+
+        n_layers = np.log2(im_size) - 1
+        if np.floor(n_layers) != n_layers:
+            print(f"warning: output_size ({im_size}) is not a power of 2")
+        n_layers = int(np.floor(n_layers))
+        out_features = np.minimum(min_features * 2**n_layers, max_features)
+        layer_size = (x_kernel, y_kernel, z_kernel)
+
+        # Build first layers
+        layers: list[nn.Module] = [self.first_layer]
+
+        # Note: Swap the normal order of the separable conv for the first layer to add more complexity
+        reshape_layers: list[nn.Module] = [
+            nn.Conv3d(input_size, out_features, kernel_size=1, stride=1, padding="same", bias=False),
+            nn.ConvTranspose3d(
+                out_features,
+                out_features,
+                (x_kernel, y_kernel, z_kernel),
+                stride=1,
+                padding=0,
+                bias=False,
+                groups=out_features,
+            ),
+        ]
+        if use_batch_norm:
+            reshape_layers.append(nn.BatchNorm3d(out_features))
+        reshape_layers.append(build_activation(act_fun))
+        layers.append(nn.Sequential(*reshape_layers))
+
+        # Build middle layers
+        upscale_kernel_size = 3
+        if upscale_type == "transpose":
+            upscale_kernel_size = 4
+
+        layer_defs = _build_middle_layer_schedule(im_size, layer_size, out_features, min_features)
+        for in_features, out_features, _ in zip(*layer_defs):
+            layers.append(
+                UpscaleBlock3D(
+                    in_features,
+                    out_features,
+                    kernel_size=upscale_kernel_size,
+                    upscale_factor=2,
+                    batch_norm=self.use_batch_norm,
+                    upscale_type=upscale_type,
+                    activation_function=build_activation(act_fun),
+                    residual=residual,
+                    separable_conv=True,
+                )
+            )
+
+        # Build the final layers
+        layers.append(
+            UpscaleBlock3D(
+                min_features,
+                num_channels,
+                kernel_size=upscale_kernel_size,
+                upscale_factor=2,
+                upscale_type=upscale_type,
+                residual=False,
+                separable_conv=False,
+                bias=last_bias,
+            )
+        )
+
+        layers.append(self.last_layer)
+        self.main: nn.Sequential = nn.Sequential(*layers)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x = torch.reshape(input, (input.shape[0], input.shape[1], 1, 1, 1))
+        return self.main(x)
 
 
 class GenSubPixelConv(nn.Module):
@@ -763,3 +1201,117 @@ class ConvAutoencoder(nn.Module):
         raise Exception("This method is under construction")
         x = self.encoder(input)
         return self.decoder(x)
+
+
+def build_generator(
+    generator_type: str,
+    input_size: int = 1,
+    im_size: int = 1,
+    num_channels: int = 1,
+    intermediate_channels: int = 3,
+    min_features: int = 64,
+    max_features: int = 512,
+    first_layer: nn.Module = nn.Identity(),
+    last_layer: nn.Module = nn.Tanh(),
+    use_batch_norm: bool = True,
+    y_kernel: int = 4,
+    x_kernel: int = 4,
+    z_kernel: int = 4,
+    act_fun: str = "ReLU",
+    upscale_type: str = "transpose",
+    residual: bool = False,
+    last_bias: bool = False,
+) -> nn.Module:
+
+    if generator_type == "legacy":
+        return Generator(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            last_bias=last_bias,
+        )
+
+    elif generator_type == "2D":
+        return Generator2D(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            act_fun=act_fun,
+            upscale_type=upscale_type,
+            residual=residual,
+            last_bias=last_bias,
+        )
+
+    elif generator_type == "3D-triplane":
+        return Generator3DTriplane(
+            input_size,
+            im_size,
+            num_channels,
+            intermediate_channels=intermediate_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            z_kernel=z_kernel,
+            act_fun=act_fun,
+            upscale_type=upscale_type,
+            residual=residual,
+            last_bias=last_bias,
+        )
+
+    elif generator_type == "3D-spectral":
+        raise NotImplementedError("3D spectral generators are under construction")
+        # return Generator3DSpectral(
+        #     input_size,
+        #     im_size,
+        #     num_channels,
+        #     min_features=min_features,
+        #     max_features=max_features,
+        #     first_layer=first_layer,
+        #     last_layer=last_layer,
+        #     use_batch_norm=use_batch_norm,
+        #     y_kernel=y_kernel,
+        #     x_kernel=x_kernel,
+        #     z_kernel=z_kernel,
+        #     act_fun=act_fun,
+        #     upscale_type=upscale_type,
+        #     residual=residual,
+        #     last_bias=last_bias,
+        # )
+    elif generator_type == "3D-voxel":
+        return Generator3DVoxel(
+            input_size,
+            im_size,
+            num_channels,
+            min_features=min_features,
+            max_features=max_features,
+            first_layer=first_layer,
+            last_layer=last_layer,
+            use_batch_norm=use_batch_norm,
+            y_kernel=y_kernel,
+            x_kernel=x_kernel,
+            z_kernel=z_kernel,
+            act_fun=act_fun,
+            upscale_type=upscale_type,
+            residual=residual,
+            last_bias=last_bias,
+        )
+    raise Exception(f"Unrecognized generator type: {generator_type}")

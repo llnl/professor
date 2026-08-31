@@ -58,6 +58,11 @@ nav:
         - tutorial/data-generation.md
         - tutorial/ml-training.md
         - tutorial/ml-visualization.md
+    - 3D model tutorial:
+        - 3D-models/index.md
+        - 3D-models/data-generation.md
+        - 3D-models/ml-training.md
+        - 3D-models/ml-visualization.md
     # - Basics: basics.md
     # - Installation: installation.md 
     # - Running: running.md

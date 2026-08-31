@@ -18,7 +18,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 import professor
 from professor.utils import consolidated_loss
 from professor.layers import AlphaLinear
-from professor.torch_models import Generator
+from professor.torch_models import build_generator
 from professor.vela.config import build_template_config, update_config_checkpoint
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.utils.data import Dataset, DataLoader
@@ -40,6 +40,8 @@ class CompleteDataset(Dataset[Any]):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
+
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -67,6 +69,8 @@ class CompleteDataset(Dataset[Any]):
         self.n_input = x.shape[0]
         self.pixels_y = y.shape[1]
         self.pixels_x = y.shape[2]
+        if len(y.shape) == 4:
+            self.pixels_z = y.shape[3]
 
 
 class CompleteDatasetDivideScaling(CompleteDataset):
@@ -75,6 +79,7 @@ class CompleteDatasetDivideScaling(CompleteDataset):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -107,6 +112,7 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -138,6 +144,8 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         self.n_input = x.shape[0]
         self.pixels_y = y.shape[1]
         self.pixels_x = y.shape[2]
+        if len(y.shape) == 4:
+            self.pixels_z = y.shape[3]
 
 
 class CompleteDatasetRandom(Dataset[Any]):
@@ -151,6 +159,7 @@ class CompleteDatasetRandom(Dataset[Any]):
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
+        self.pixels_z: int = 0
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
@@ -172,6 +181,8 @@ class CompleteDatasetRandom(Dataset[Any]):
         self.n_input = x.shape[0]
         self.pixels_y = y.shape[1]
         self.pixels_x = y.shape[2]
+        if len(y.shape) == 4:
+            self.pixels_z = y.shape[3]
 
 
 def main(args: argparse.Namespace) -> None:
@@ -354,6 +365,7 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError(f"Unrecognized dataset type: {args.dataset_type}")
     n_pixels_y = TrainDataset.pixels_y
     n_pixels_x = TrainDataset.pixels_x
+    n_pixels_z = TrainDataset.pixels_z
     n_input = TrainDataset.n_input
 
     if args.dataset_type == 0:
@@ -390,27 +402,35 @@ def main(args: argparse.Namespace) -> None:
     n_train = TrainDataset.__len__()
 
     n_pixels = max(n_pixels_y, n_pixels_x)
+    n_dims = 2
+    if n_pixels_z > 1:
+        n_dims = 3
+        n_pixels = max(n_pixels, n_pixels_z)
 
-    finalLayer = AlphaLinear(n_channels=n_channels)
+    finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
 
-    model = Generator(
+    # Select generator strategy
+    # Note: use_batch_norm and last_bias are not wired into the user argument parser
+    model = build_generator(
+        args.generator_type,
         input_size=n_input,
         im_size=n_pixels,
         num_channels=n_models,
+        intermediate_channels=args.intermediate_channels,
         max_features=args.max_feature,
         min_features=args.min_feature,
         first_layer=nn.Identity(),
         last_layer=finalLayer,
-        y_kernel=args.y_kernel,
         x_kernel=args.x_kernel,
+        y_kernel=args.y_kernel,
+        z_kernel=args.z_kernel,
+        act_fun=args.act_fun,
+        upscale_type=args.upscale_type,
+        residual=args.residual,
     )
 
     if rank == 0:
-        model_stats = summary(
-            model,
-            input_size=(batch_size, n_input, 1, 1),
-            depth=7,
-        )
+        model_stats = summary(model, input_size=(batch_size, n_input, 1, 1), depth=7, device="cpu")
         with open(f"{output_dir}/model.info", "wb") as f:
             f.write(str(model_stats).encode("utf-8"))
 
@@ -458,17 +478,38 @@ def main(args: argparse.Namespace) -> None:
         shuffle=False,
     )
 
+    # Build optimizers
     optimizer = ZeroRedundancyOptimizer(
         model.parameters(),
         optimizer_class=torch.optim.Adam,
         lr=lr,
     )
+
+    # Note: complex parameters must be handled in a separate step with the ZeroRedundancyOptimizer
+    #       this option needs additional testing, so defer it to a future PR
+    # real_params = [p for p in model.parameters() if p.dtype == torch.float32]
+    # complex_params = [p for p in model.parameters() if p.dtype == torch.complex64]
+    # optimizer = ZeroRedundancyOptimizer(
+    #     real_params,
+    #     optimizer_class=torch.optim.Adam,
+    #     lr=lr,
+    # )
+    # optimizer_complex = None
+    # if len(complex_params):
+    #     optimizer_complex = ZeroRedundancyOptimizer(
+    #         complex_params,
+    #         optimizer_class=torch.optim.Adam,
+    #         lr=lr,
+    #     )
+
     if restart:
         # load optimizer state
         optimizer.load_state_dict(torch.load(restart_model)["optimizer"])
+        # if optimizer_complex is not None:
+        #     optimizer_complex.load_state_dict(torch.load(restart_model)["optimizer_complex"])
         print(f"[Rank{rank}] loaded previous optimizer state")
 
-    if args.vis_config:
+    if args.vis_config and rank == 0:
         # TODO: Estimate these values from the training data
         model_name = "Professor Model"
         model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_input)]
@@ -478,14 +519,22 @@ def main(args: argparse.Namespace) -> None:
             model_name=model_name,
             checkpoint_path=f"{output_dir}/0000.pt",
             n_channels=n_channels,
+            intermediate_channels=args.intermediate_channels,
             n_inputs=n_input,
             x_pixels=n_pixels_x,
             y_pixels=n_pixels_y,
+            z_pixels=n_pixels_z,
             min_features=args.min_feature,
             max_features=args.max_feature,
             x_kernel=args.x_kernel,
             y_kernel=args.y_kernel,
+            z_kernel=args.z_kernel,
             input_parameters=model_params,
+            fields=keys,
+            generator_type=args.generator_type,
+            act_fun=args.act_fun,
+            upscale_type=args.upscale_type,
+            residual=args.residual,
         )
 
     # try to free up gpu memory
@@ -526,6 +575,9 @@ def main(args: argparse.Namespace) -> None:
                 training_losses = torch.zeros(n_models)
             with record_function("epoch_iteration"):
                 optimizer.zero_grad(set_to_none=True)
+                # if optimizer_complex is not None:
+                #     optimizer_complex.zero_grad(set_to_none=True)
+
                 for batch_idx, (data, target) in enumerate(train_loader):
                     with record_function("optimizer_step"):
                         should_update_weights = (batch_idx + 1) % batch_multiplier == 0
@@ -551,7 +603,13 @@ def main(args: argparse.Namespace) -> None:
 
                         if should_update_weights:
                             optimizer.step()
+                            # if optimizer_complex is not None:
+                            #     optimizer_complex.step()
+
                             optimizer.zero_grad(set_to_none=True)
+                            # if optimizer_complex is not None:
+                            #     optimizer_complex.zero_grad(set_to_none=True)
+
                     with record_function("other_losses"):
                         with torch.no_grad():
                             losses = consolidated_loss(
@@ -622,18 +680,27 @@ def main(args: argparse.Namespace) -> None:
 
                 if epoch % n_checkpoint == 0 or epoch == num_epochs - 1:
                     optimizer.consolidate_state_dict()
+                    # if optimizer_complex is not None:
+                    #     optimizer_complex.consolidate_state_dict()
+
                     if rank == 0:
-                        filepath = f"{output_dir}/{epoch:04d}.pt"
+                        filepath = f"{output_dir}/{epoch:04d}"
                         state = {"optimizer": optimizer.state_dict()}
+                        # if optimizer_complex is not None:
+                        #     state["optimizer_complex"] = optimizer_complex.state_dict()
+
                         state["model"] = model.module.state_dict()
                         torch.save(state, filepath)
 
                         # Update the autogenerated config with the new checkpoint
                         if args.vis_config:
-                            update_config_checkpoint(
-                                config_fname=args.vis_config,
-                                checkpoint_path=filepath,
-                            )
+                            try:
+                                update_config_checkpoint(
+                                    config_fname=args.vis_config,
+                                    checkpoint_path=filepath,
+                                )
+                            except Exception as e:
+                                print(f"[Rank{rank}] Failed to update config: {repr(e)}")
 
                     # get val images and save them with tensorboard
                     val_images = []
@@ -645,7 +712,14 @@ def main(args: argparse.Namespace) -> None:
                     # print(output.shape)
                     if not isinstance(output, torch.Tensor):
                         raise Exception(f"Model returned an unexpected value: {type(output)}")
-                    val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x)
+
+                    if n_dims == 2:
+                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x)
+                    elif n_dims == 3:
+                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x, n_pixels_z)
+                    else:
+                        raise Exception(f"Invalid number of dimensions: {n_dims}")
+
                     # need to convert this to 0 - 1 output
                     val_flat = output.view(n_channels, -1)
                     d_min = val_flat.min(dim=1)[0]
@@ -656,14 +730,26 @@ def main(args: argparse.Namespace) -> None:
                         val_images[:, key_ind] /= d_max[key_ind] - d_min[key_ind]  # noqa E501
                     if (rank == 0) and (writer is not None):
                         for key_ind, key in enumerate(keys):
-                            writer.add_images(
-                                key,
-                                val_images[:, key_ind].view(
+                            img_view = []
+                            if n_dims == 2:
+                                img_view = val_images[:, key_ind].view(
                                     -1,
                                     1,
                                     n_pixels_y,
                                     n_pixels_x,
-                                ),
+                                )
+                            elif n_dims == 3:
+                                # For 3D records, save the mid-point of the z dim
+                                img_view = val_images[:, key_ind, :, :, n_pixels_z // 2].view(
+                                    -1,
+                                    1,
+                                    n_pixels_y,
+                                    n_pixels_x,
+                                )
+
+                            writer.add_images(
+                                key,
+                                img_view,
                                 epoch,
                             )
 
