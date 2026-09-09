@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Enable Tk scaling 1.0 in a PyInstaller onedir bundle."""
 
-from pathlib import Path
 import argparse
 import re
 import sys
-
+from pathlib import Path
 
 SCALING_BLOCK = """# Set a consistent Tk scale for the frozen application.
 if {[llength [info commands tk]]} {
