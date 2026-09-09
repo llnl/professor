@@ -19,8 +19,7 @@ def patch_bundle(root: Path) -> bool:
 
     if not tk_script.is_file():
         raise FileNotFoundError(
-            f"Could not find bundled Tk script: {tk_script}\n"
-            "Pass the root directory of the PyInstaller onedir bundle."
+            f"Could not find bundled Tk script: {tk_script}\nPass the root directory of the PyInstaller onedir bundle."
         )
 
     content = tk_script.read_text(encoding="utf-8")
@@ -39,9 +38,7 @@ def patch_bundle(root: Path) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Patch a PyInstaller bundle to set Tk scaling to 1.0."
-    )
+    parser = argparse.ArgumentParser(description="Patch a PyInstaller bundle to set Tk scaling to 1.0.")
     parser.add_argument("bundle_root", type=Path, help="PyInstaller onedir root")
     args = parser.parse_args()
 
