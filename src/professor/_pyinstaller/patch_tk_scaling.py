@@ -31,7 +31,7 @@ def patch_bundle(root: Path) -> bool:
         raise RuntimeError(f"Unexpected Tk script format: {tk_script}")
 
     insertion = "\n\n" + SCALING_BLOCK.rstrip("\n")
-    content = content[: match.end()] + insertion + content[match.end() :]
+    content = content[: match.end()] + insertion + content[match.end() :]  # noqa: E203
     tk_script.write_text(content, encoding="utf-8")
     return True
 
