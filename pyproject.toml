@@ -44,7 +44,8 @@ gui = [
 ]
 dash = [
     "dash>=4.2.0",
-    "dash-bootstrap-components>=2.0.4"
+    "dash-bootstrap-components>=2.0.4",
+    "h5py",
 ]
 all = [
     "professor[trainer,gui,dash]",
@@ -63,10 +64,10 @@ dev = [
 
 [project.scripts]
 prof-trainer = "professor.__main__:prof_trainer"
+prof-dash-gui = "professor.gui.dash_gui:main"
 
 [project.gui-scripts]
 prof-vis = "professor.vela.__main__:main"
-prof-dash-gui = "professor.gui.dash_gui:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "professor.__version__"}
@@ -82,6 +83,15 @@ line-length = 120
 
 [tool.setuptools.package-data]
 "*" = ["py.typed", "*.yaml", "*.css"]
+"professor._pyinstaller" = [
+    "README.md",
+    "hook-dash.py",
+    "hook-dash_bootstrap_components.py",
+    "hook-professor.py",
+    "logo_tiny.jpg",
+    "prof-dash-gui.spec",
+    "run_prof_dash_gui.py",
+]
 
 [tool.pyright]
 reportUnknownMemberType = "none"
