@@ -189,9 +189,14 @@ class CompleteDatasetRandom(Dataset[Any]):
 class ParametricDatasetWrapper(Dataset[Any]):
     def __init__(
         self,
-        child_dataset: CompleteDataset | CompleteDatasetOneFileSims | CompleteDatasetDivideScaling | CompleteDatasetRandom
+        child_dataset: CompleteDataset
+        | CompleteDatasetOneFileSims
+        | CompleteDatasetDivideScaling
+        | CompleteDatasetRandom,
     ):
-        self.child_dataset: CompleteDataset | CompleteDatasetOneFileSims | CompleteDatasetDivideScaling | CompleteDatasetRandom = child_dataset
+        self.child_dataset: (
+            CompleteDataset | CompleteDatasetOneFileSims | CompleteDatasetDivideScaling | CompleteDatasetRandom
+        ) = child_dataset
         self.n_input: int = self.child_dataset.n_input + 1
         self.pixels_y: int = self.child_dataset.pixels_y
         self.pixels_x: int = self.child_dataset.pixels_x
@@ -425,7 +430,7 @@ def main(args: argparse.Namespace) -> None:
 
     # Check to see if the dataset should be sliced along the z-axis
     parametric_slices: int = 0
-    if (n_pixels_z > 1) and ('3D' not in args.generator_type):
+    if (n_pixels_z > 1) and ("3D" not in args.generator_type):
         TrainDataset = ParametricDatasetWrapper(TrainDataset)
         ValDataset = ParametricDatasetWrapper(ValDataset)
         n_pixels_z = 1
@@ -570,7 +575,7 @@ def main(args: argparse.Namespace) -> None:
             generator_type=args.generator_type,
             act_fun=args.act_fun,
             upscale_type=args.upscale_type,
-            residual=args.residual
+            residual=args.residual,
         )
 
     # try to free up gpu memory

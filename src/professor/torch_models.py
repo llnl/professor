@@ -747,11 +747,7 @@ class Generator3DVoxel(nn.Module):
 
 
 class GeneratorParametricWrapper(nn.Module):
-    def __init__(
-        self,
-        base_generator: nn.Module,
-        parametric_slices: int
-    ) -> None:
+    def __init__(self, base_generator: nn.Module, parametric_slices: int) -> None:
         """
         Wrapper for parameteric generator models that will convert 2D slices into 3D volumes
         """

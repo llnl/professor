@@ -316,9 +316,9 @@ class PyTorchModel(Model):
                 _ = current_model.ref(current_model.tensor)
 
     def _set_parametric_slices(self, current_model: ModelCollection):
-            if self._config.parametric_slices > 1:
-                logger.info(f"Configuring model to use {self._config.parametric_slices} slices")
-                current_model.ref = GeneratorParametricWrapper(current_model.ref, self._config.parametric_slices)
+        if self._config.parametric_slices > 1:
+            logger.info(f"Configuring model to use {self._config.parametric_slices} slices")
+            current_model.ref = GeneratorParametricWrapper(current_model.ref, self._config.parametric_slices)
 
     def _move_tensor_to_cpu(self, tensor: torch.Tensor) -> torch.Tensor:
         t = tensor.detach().cpu()
