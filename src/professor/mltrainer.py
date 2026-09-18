@@ -27,10 +27,10 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from time import time, sleep
 from torchinfo import summary
-from typing import cast, Tuple, Any
+from typing import Any, cast
 
 
-class CompleteDataset(Dataset[Any]):
+class CompleteDatasetBase(Dataset[Any]):
     def __init__(
         self,
         filelist: NDArray[np.str_],
@@ -38,6 +38,7 @@ class CompleteDataset(Dataset[Any]):
         path: str,
     ):
         self._length: int = len(filelist)
+        self._base_length: int = self._length
         self._path: str = path
         self.pixels_y: int = 0
         self.pixels_x: int = 0
@@ -46,24 +47,51 @@ class CompleteDataset(Dataset[Any]):
         self.n_channels: int = n_channels
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
+        self.parametric_slices: int = 0
+        self._parametric_enabled: bool = False
         self.__getsizes__(0)
 
     def __len__(self) -> int:
         return self._length
 
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        myfile = f"{self._path}/{self.filelist[i]}"
-        try:
-            with h5py.File(myfile, "r") as f:
-                # calling nan_to_num does seem to impact performance
-                inputs = cast(h5py.Group, f["inputs"])[:]
-                data = cast(h5py.Group, f["fields"])[:]
-            inputs = torch.from_numpy(inputs)
-            data = torch.from_numpy(data)
-            return inputs.view(-1, 1, 1), data
-        except Exception as e:
-            error = f"Exception {e} while processing {myfile}"
-            raise RuntimeError(error)
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        parametric_slice = None
+        if self._parametric_enabled:
+            case_id, parametric_slice = divmod(i, self.parametric_slices)
+        else:
+            case_id = i
+
+        inputs, data = self._read_item(case_id, parametric_slice)
+        inputs_tensor = torch.from_numpy(inputs).view(-1, 1, 1)
+        data_tensor = torch.from_numpy(data)
+        inputs_tensor = self._transform_inputs(inputs_tensor)
+        if parametric_slice is None:
+            return inputs_tensor, data_tensor
+
+        z = torch.tensor(
+            float(parametric_slice) / self.parametric_slices,
+            dtype=inputs_tensor.dtype,
+        ).view(1, 1, 1)
+        return torch.cat([inputs_tensor, z], dim=0), data_tensor
+
+    def enable_parametric_slicing(self) -> None:
+        """Switch this dataset to direct, one-z-plane-per-index reads."""
+        if self._parametric_enabled:
+            return
+        if self.pixels_z <= 1:
+            raise ValueError("Parametric slicing requires a 3D dataset.")
+
+        self.parametric_slices = self.pixels_z
+        self._length = self._base_length * self.parametric_slices
+        self.pixels_z = 1
+        self.n_input += 1
+        self._parametric_enabled = True
+
+    def _transform_inputs(self, inputs: torch.Tensor) -> torch.Tensor:
+        return inputs
+
+    def _read_item(self, i: int, parametric_slice: int | None) -> tuple[NDArray[Any], NDArray[Any]]:
+        raise NotImplementedError
 
     def __getsizes__(self, i: int) -> None:
         x, y = self.__getitem__(i)
@@ -74,147 +102,68 @@ class CompleteDataset(Dataset[Any]):
             self.pixels_z = y.shape[3]
 
 
-class CompleteDatasetDivideScaling(CompleteDataset):
-    def __init__(self, filelist: NDArray[np.str_], n_channels: int, path: str, scaling: torch.Tensor) -> None:
-        self._length: int = len(filelist)
-        self._path: str = path
-        self.pixels_y: int = 0
-        self.pixels_x: int = 0
-        self.pixels_z: int = 0
-        self.n_channels: int = n_channels
-        self.filelist: NDArray[np.str_] = filelist
-        self.n_input: int = 0
-        self.scaling: torch.Tensor = scaling
-        self.__getsizes__(0)
-
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
+class CompleteDataset(CompleteDatasetBase):
+    def _read_item(self, i: int, parametric_slice: int | None) -> tuple[NDArray[Any], NDArray[Any]]:
         myfile = f"{self._path}/{self.filelist[i]}"
         try:
             with h5py.File(myfile, "r") as f:
-                # calling nan_to_num does seem to impact performance
-                inputs = cast(h5py.Group, f["inputs"])[:]
-                data = cast(h5py.Group, f["fields"])[:]
-            inputs = torch.from_numpy(inputs)
-            data = torch.from_numpy(data)
-            return inputs.view(-1, 1, 1) / self.scaling, data
+                # Calling nan_to_num does seem to impact performance.
+                inputs = cast(h5py.Dataset, f["inputs"])[:]
+                fields = cast(h5py.Dataset, f["fields"])
+                data = fields[:] if parametric_slice is None else fields[..., parametric_slice]
+            return inputs, data
         except Exception as e:
-            error = f"Exception {e} while processing {myfile}"
-            raise RuntimeError(error)
+            raise RuntimeError(f"Exception {e} while processing {myfile}") from e
 
 
-class CompleteDatasetOneFileSims(Dataset[Any]):
+class CompleteDatasetDivideScaling(CompleteDataset):
+    def __init__(self, filelist: NDArray[np.str_], n_channels: int, path: str, scaling: torch.Tensor) -> None:
+        self.scaling: torch.Tensor = scaling
+        super().__init__(filelist, n_channels, path)
+
+    def _transform_inputs(self, inputs: torch.Tensor) -> torch.Tensor:
+        return inputs / self.scaling
+
+
+class CompleteDatasetOneFileSims(CompleteDatasetBase):
     def __init__(
         self,
         filelist: NDArray[np.str_],
         n_channels: int,
         path: str,
     ):
-        self._length: int = len(filelist)
-        self._path: str = path
-        self.pixels_y: int = 0
-        self.pixels_x: int = 0
-        self.pixels_z: int = 0
-        self.n_channels: int = n_channels
-        self.filelist: NDArray[np.str_] = filelist
-        self.n_input: int = 0
-        self.__getsizes__(0)
+        super().__init__(filelist, n_channels, path)
 
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _read_item(self, i: int, parametric_slice: int | None) -> tuple[NDArray[Any], NDArray[Any]]:
         file = self.filelist[i][0]
         idx = self.filelist[i][1]
         myfile = f"{self._path}/{file}"
         try:
             with h5py.File(myfile, "r") as f:
-                # calling nan_to_num does seem to impact performance
-                # inputs = np.nan_to_num(f['inputs'][idx])
-                # data = np.nan_to_num(f['fields'][idx])
-                inputs = cast(h5py.Group, f["inputs"])[idx]
-                data = cast(h5py.Group, f["fields"])[idx]
-            inputs = torch.from_numpy(inputs)
-            data = torch.from_numpy(data)
-            return inputs.view(-1, 1, 1), data
+                inputs = cast(h5py.Dataset, f["inputs"])[idx]
+                fields = cast(h5py.Dataset, f["fields"])
+                data = fields[idx] if parametric_slice is None else fields[idx, ..., parametric_slice]
+            return inputs, data
         except Exception as e:
-            error = f"Exception {e} while processing {myfile}"
-            raise RuntimeError(error)
-
-    def __getsizes__(self, i: int) -> None:
-        x, y = self.__getitem__(i)
-        self.n_input = x.shape[0]
-        self.pixels_y = y.shape[1]
-        self.pixels_x = y.shape[2]
-        if len(y.shape) == 4:
-            self.pixels_z = y.shape[3]
+            raise RuntimeError(f"Exception {e} while processing {myfile}") from e
 
 
-class CompleteDatasetRandom(Dataset[Any]):
+class CompleteDatasetRandom(CompleteDatasetBase):
     def __init__(
         self,
         filelist: NDArray[np.str_],
         n_channels: int,
         path: str,
     ):
-        self._length: int = len(filelist)
-        self._path: str = path
-        self.pixels_y: int = 0
-        self.pixels_x: int = 0
-        self.pixels_z: int = 0
-        self.n_channels: int = n_channels
-        self.filelist: NDArray[np.str_] = filelist
-        self.n_input: int = 0
-        self.__getsizes__(0)
+        super().__init__(filelist, n_channels, path)
 
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _read_item(self, i: int, parametric_slice: int | None) -> tuple[NDArray[Any], NDArray[Any]]:
         myfile = f"{self._path}/{self.filelist[i]}"
         try:
-            return torch.rand((6, 1, 1)), torch.rand((7, 512, 1664))
+            data = torch.rand((7, 512, 1664))
+            return torch.rand(6).numpy(), data.numpy()
         except Exception as e:
-            error = f"Exception {e} while processing {myfile}"
-            raise RuntimeError(error)
-
-    def __getsizes__(self, i: int) -> None:
-        x, y = self.__getitem__(i)
-        self.n_input = x.shape[0]
-        self.pixels_y = y.shape[1]
-        self.pixels_x = y.shape[2]
-        if len(y.shape) == 4:
-            self.pixels_z = y.shape[3]
-
-
-class ParametricDatasetWrapper(Dataset[Any]):
-    def __init__(
-        self,
-        child_dataset: CompleteDataset
-        | CompleteDatasetOneFileSims
-        | CompleteDatasetDivideScaling
-        | CompleteDatasetRandom,
-    ):
-        self.child_dataset: (
-            CompleteDataset | CompleteDatasetOneFileSims | CompleteDatasetDivideScaling | CompleteDatasetRandom
-        ) = child_dataset
-        self.n_input: int = self.child_dataset.n_input + 1
-        self.pixels_y: int = self.child_dataset.pixels_y
-        self.pixels_x: int = self.child_dataset.pixels_x
-        self.pixels_z: int = 1
-        self.parametric_slices: int = self.child_dataset.pixels_z
-        self._length: int = len(self.child_dataset) * self.parametric_slices
-
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        child_id = i // self.parametric_slices
-        slice_id = i % self.parametric_slices
-        x, y = self.child_dataset[child_id]
-
-        z = torch.Tensor([float(slice_id) / self.parametric_slices])
-        xp = torch.cat([x, z.view(1, 1, 1)], dim=0)
-        return xp, y[..., slice_id]
+            raise RuntimeError(f"Exception {e} while processing {myfile}") from e
 
 
 def main(args: argparse.Namespace) -> None:
@@ -431,10 +380,10 @@ def main(args: argparse.Namespace) -> None:
     # Check to see if the dataset should be sliced along the z-axis
     parametric_slices: int = 0
     if (n_pixels_z > 1) and ("3D" not in args.generator_type):
-        TrainDataset = ParametricDatasetWrapper(TrainDataset)
-        ValDataset = ParametricDatasetWrapper(ValDataset)
+        TrainDataset.enable_parametric_slicing()
+        ValDataset.enable_parametric_slicing()
         n_pixels_z = 1
-        n_input += 1
+        n_input = TrainDataset.n_input
         parametric_slices = TrainDataset.parametric_slices
 
     print(f"[Rank{rank}] finished setting up data loaders")
