@@ -698,6 +698,8 @@ def build_template_config(
     conf["model"]["pytorch"]["invocation"]["target"] = available_generators[generator_type]
 
     params = conf["model"]["pytorch"]["invocation"]["params"]
+    model_input_count = n_inputs + int(parametric_slices > 1)
+    params["input_size"] = model_input_count
     params["num_channels"] = n_channels
     params["im_size"] = max(y_pixels, x_pixels, z_pixels)  # as in prof-trainer; the template uses x_pixels
     params["min_features"] = min_features
@@ -742,8 +744,8 @@ def build_template_config(
         params["first_layer"]["invocation"] = {
             "target": "professor.layers.InputScaling",
             "params": {
-                "offset": [float(v) for v in input_offset or [0.0] * n_inputs],
-                "scale": [float(v) for v in input_scale or [1.0] * n_inputs],
+                "offset": [float(v) for v in input_offset or [0.0] * model_input_count],
+                "scale": [float(v) for v in input_scale or [1.0] * model_input_count],
                 "log_inputs": [int(v) for v in log_inputs or []],
             },
         }
