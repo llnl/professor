@@ -8,14 +8,16 @@ from typing import Optional, Any, cast
 
 
 class AlphaLinear(nn.Module):
-    def __init__(self, n_channels: int = 1) -> None:
+    def __init__(self, n_channels: int = 1, n_dims: int = 2) -> None:
         super(AlphaLinear, self).__init__()
+        tensor_size = [1, n_channels] + [1 for _ in range(n_dims)]
+
         self.alpha: nn.Parameter = nn.Parameter(
-            torch.ones(1, n_channels, 1, 1),
+            torch.ones(*tensor_size),
             requires_grad=True,
         )
         self.beta: nn.Parameter = nn.Parameter(
-            torch.ones(1, n_channels, 1, 1),
+            torch.ones(*tensor_size),
             requires_grad=True,
         )
 
@@ -179,3 +181,281 @@ class ModReLU(nn.Module):
         for i in range(self.n_channels):
             out[:, i] = (self.ReLU(x[:, i]) - d_min[i]) / (1.0 / (d_max[i] - d_min[i]))  # noqa E501
         return out
+
+
+class UpscaleBlock2D(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int = 4,
+        upscale_factor: int = 2,
+        residual: bool = False,
+        bias: bool = False,
+        batch_norm: bool = True,
+        upscale_type: str = "transpose",
+        activation_function: nn.Module | None = None,
+    ):
+        super().__init__()
+        self._residual: bool = residual
+
+        # Check upscaling options
+        conv_upscale = upscale_type == "transpose"
+        if self._residual and conv_upscale and (kernel_size - upscale_factor) % 2 != 0:
+            raise ValueError(
+                "UpscaleBlock2D with residual=True and upscale_type='transpose' "
+                "requires kernel_size - upscale_factor to be even."
+            )
+
+        interp_kwargs = {}
+        if "linear" in upscale_type:
+            upscale_type = "bilinear"
+            interp_kwargs["align_corners"] = True
+        if self._residual and conv_upscale:
+            upscale_type = "bilinear"
+
+        # Build the upsampler
+        self.skip: nn.Module | None = None
+        if upscale_type not in ["bilinear", "nearest", "transpose"]:
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+        if self._residual and upscale_type in ["bilinear", "nearest"]:
+            self.skip = nn.Sequential(
+                nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
+                nn.Conv2d(in_channels, out_channels, 1, stride=1, padding="same", bias=False),
+            )
+
+        self.main: nn.Module
+        if conv_upscale:
+            padding = (kernel_size - upscale_factor) // 2
+            self.main = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, upscale_factor, padding, bias=bias)
+
+        else:
+            self.main = nn.Sequential(
+                nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
+                nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding="same", bias=bias),
+            )
+
+        self.norm: nn.Module
+        if batch_norm:
+            self.norm = nn.BatchNorm2d(out_channels)
+        else:
+            self.norm = nn.Identity()
+
+        self.activation: nn.Module
+        if activation_function is not None:
+            self.activation = activation_function
+        else:
+            self.activation = nn.Identity()
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self._residual:
+            s = self.skip(input)  # type: ignore
+            x = self.main(input)
+            y = self.norm(x)
+            z = s + y
+            return self.activation(z)
+
+        else:
+            x = self.main(input)
+            y = self.norm(x)
+            return self.activation(y)
+
+
+class UpscaleBlock3D(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        kernel_size: int = 4,
+        upscale_factor: int = 2,
+        residual: bool = False,
+        bias: bool = False,
+        batch_norm: bool = True,
+        upscale_type: str = "transpose",
+        separable_conv: bool = False,
+        activation_function: nn.Module | None = None,
+    ):
+        super().__init__()
+        self._residual: bool = residual
+
+        # Check upscaling options
+        conv_upscale = upscale_type == "transpose"
+        if self._residual and conv_upscale and (kernel_size - upscale_factor) % 2 != 0:
+            raise ValueError(
+                "UpscaleBlock3D with residual=True and upscale_type='transpose' "
+                "requires kernel_size - upscale_factor to be even."
+            )
+
+        interp_kwargs = {}
+        if "linear" in upscale_type:
+            upscale_type = "trilinear"
+            interp_kwargs["align_corners"] = True
+        if self._residual and conv_upscale:
+            upscale_type = "trilinear"
+
+        # Build the upsampler
+        self.skip: nn.Module | None = None
+        if upscale_type not in ["trilinear", "nearest", "transpose"]:
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+        if self._residual and upscale_type in ["trilinear", "nearest"]:
+            self.skip = nn.Sequential(
+                nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
+                nn.Conv3d(in_features, out_features, 1, stride=1, padding="same", bias=False),
+            )
+
+        # Build the main path
+        layers = []
+        if conv_upscale:
+            padding = (kernel_size - upscale_factor) // 2
+            if separable_conv:
+                layers.append(
+                    nn.ConvTranspose3d(
+                        in_features,
+                        in_features,
+                        kernel_size=kernel_size,
+                        stride=upscale_factor,
+                        padding=padding,
+                        bias=False,
+                        groups=in_features,
+                    )
+                )
+                layers.append(
+                    nn.Conv3d(
+                        in_features,
+                        out_features,
+                        kernel_size=1,
+                        stride=1,
+                        padding="same",
+                        bias=bias,
+                    )
+                )
+            else:
+                layers.append(
+                    nn.ConvTranspose3d(in_features, out_features, kernel_size, upscale_factor, padding, bias=bias)
+                )
+
+        else:
+            layers.append(nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs))
+            if separable_conv:
+                layers.append(
+                    nn.Conv3d(
+                        in_features,
+                        in_features,
+                        kernel_size=kernel_size,
+                        stride=1,
+                        padding="same",
+                        bias=False,
+                        groups=in_features,
+                    )
+                )
+                layers.append(nn.Conv3d(in_features, out_features, kernel_size=1, stride=1, padding="same", bias=bias))
+            else:
+                layers.append(nn.Conv3d(in_features, out_features, kernel_size, stride=1, padding="same", bias=bias))
+
+        self.main = nn.Sequential(*layers)
+
+        # Build the norm and activation
+        self.norm: nn.Module
+        if batch_norm:
+            self.norm = nn.BatchNorm3d(out_features)
+        else:
+            self.norm = nn.Identity()
+
+        self.activation: nn.Module
+        if activation_function is not None:
+            self.activation = activation_function
+        else:
+            self.activation = nn.Identity()
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self._residual:
+            s = self.skip(input)  # type: ignore
+            x = self.main(input)
+            y = self.norm(x)
+            z = s + y
+            return self.activation(z)
+
+        else:
+            x = self.main(input)
+            y = self.norm(x)
+            return self.activation(y)
+
+
+class UpscaleBlock3DSpectral(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        num_modes: tuple[int, int, int] = (8, 8, 8),
+        upscale_factor: int = 2,
+        residual: bool = False,
+        bias: bool = False,
+        batch_norm: bool = True,
+        upscale_type: str = "transpose",
+        activation_function: nn.Module | None = None,
+    ):
+        # TODO: add this requirement to the pyroject.toml when this feature is ready
+        from neuralop.layers.spectral_convolution import SpectralConv  # type: ignore
+
+        super().__init__()
+        self._residual: bool = residual
+
+        # Check upscaling options
+        conv_upscale = upscale_type == "transpose"
+
+        interp_kwargs = {}
+        if "linear" in upscale_type:
+            upscale_type = "trilinear"
+            interp_kwargs["align_corners"] = True
+        if self._residual and conv_upscale:
+            upscale_type = "trilinear"
+
+        # Build the upsampler
+        self.skip: nn.Module | None = None
+        if upscale_type not in ["trilinear", "nearest", "transpose"]:
+            raise ValueError(f"Unrecognized layer upscale type: {upscale_type}")
+        if self._residual and upscale_type in ["trilinear", "nearest"]:
+            self.skip = nn.Sequential(
+                nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs),
+                nn.Conv3d(in_features, out_features, 1, stride=1, padding="same", bias=False),
+            )
+
+        self.main: nn.Module
+        if conv_upscale:
+            self.main = SpectralConv(
+                in_features,
+                out_features,
+                num_modes,
+                resolution_scaling_factor=upscale_factor,
+                bias=bias,
+            )
+        else:
+            layers = []
+            layers.append(nn.Upsample(scale_factor=upscale_factor, mode=upscale_type, **interp_kwargs))
+            layers.append(SpectralConv(in_features, out_features, num_modes, bias=bias))
+            self.main = nn.Sequential(*layers)
+
+        self.norm: nn.Module
+        if batch_norm:
+            self.norm = nn.BatchNorm3d(out_features)
+        else:
+            self.norm = nn.Identity()
+
+        self.activation: nn.Module
+        if activation_function is not None:
+            self.activation = activation_function
+        else:
+            self.activation = nn.Identity()
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self._residual:
+            s = self.skip(input)  # type: ignore
+            x = self.main(input)
+            y = self.norm(x)
+            z = s + y
+            return self.activation(z)
+
+        else:
+            x = self.main(input)
+            y = self.norm(x)
+            return self.activation(y)

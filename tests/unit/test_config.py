@@ -3,21 +3,38 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import pytest
+from omegaconf import OmegaConf
 from schema import SchemaError, SchemaMissingKeyError, SchemaWrongKeyError
+
 from professor.vela.config import (
     AppearanceSchema,
     # CheckpointsSchema,
+    DimensionsSchema,
     ExecutionSchema,
     FieldsSchema,
     FullSchema,
     GUISchema,
-    Keys,
-    DimensionsSchema,
     InvocationSchema,
+    Keys,
     ModelSchema,
     PluginsSchema,
     SlidersSchema,
+    build_template_config,
 )
+
+
+def test_build_template_config_sets_act_fun(tmp_path):
+    config_path = tmp_path / "template_config.yaml"
+
+    build_template_config(
+        config_fname=str(config_path),
+        checkpoint_path="0000.pt",
+        act_fun="LeakyReLU",
+    )
+
+    conf = FullSchema(OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)).val
+    params = conf[Keys.MODEL.value][Keys.PYTORCH.value][Keys.INVOCATION.value][Keys.PARAMS.value]
+    assert params["act_fun"] == "LeakyReLU"
 
 
 # class TestCheckpointSchema:
@@ -40,7 +57,13 @@ class TestDimensionsSchema:
         DimensionsSchema(dimensions_conf)
 
     def test_missing_keys(self, dimensions_conf):
-        for key in dimensions_conf.keys():
+        required_keys = (
+            Keys.N_INPUTS.value,
+            Keys.BATCH_SIZE.value,
+            Keys.Y_PIXELS.value,
+            Keys.X_PIXELS.value,
+        )
+        for key in required_keys:
             copy = dimensions_conf.copy()
             copy.pop(key, None)
             with pytest.raises(SchemaMissingKeyError):
@@ -54,6 +77,11 @@ class TestDimensionsSchema:
                 DimensionsSchema(copy)
 
     def test_val_set(self, dimensions_conf):
+        expected = dimensions_conf | {Keys.Z_PIXELS.value: 1}
+        assert DimensionsSchema(dimensions_conf).val == expected
+
+    def test_explicit_z_pixels(self, dimensions_conf):
+        dimensions_conf[Keys.Z_PIXELS.value] = 16
         assert DimensionsSchema(dimensions_conf).val == dimensions_conf
 
 

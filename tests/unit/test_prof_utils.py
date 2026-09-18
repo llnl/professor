@@ -9,7 +9,6 @@ from professor import utils
 
 
 class TestConsolidatedLoss(unittest.TestCase):
-
     # Create random tensors for testing
     torch.manual_seed(42)  # For reproducibility
     pred = torch.rand(10, 5)

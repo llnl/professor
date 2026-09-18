@@ -40,7 +40,9 @@ def test_load_cfg(model_mock):
     assert model_mock._config.conf == MOCK_CONFIG
     assert model_mock._config.conf["model"] == MOCK_CONFIG["model"]
     assert model_mock._config.seed == MOCK_CONFIG["model"]["pytorch"]["seed"]
-    assert model_mock._config.dimensions == MOCK_CONFIG["model"]["pytorch"]["dimensions"]
+    expected_dimensions = OmegaConf.to_container(MOCK_CONFIG["model"]["pytorch"]["dimensions"], resolve=True)
+    expected_dimensions["z_pixels"] = 1
+    assert model_mock._config.dimensions == expected_dimensions
     assert model_mock._config.invocation == MOCK_CONFIG["model"]["pytorch"]["invocation"]
     assert model_mock._config.execution == MOCK_CONFIG["model"]["pytorch"]["execution"]
     assert model_mock._config.gui == MOCK_CONFIG["gui"]["napari"]
