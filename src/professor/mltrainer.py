@@ -434,6 +434,7 @@ def main(args: argparse.Namespace) -> None:
         TrainDataset = ParametricDatasetWrapper(TrainDataset)
         ValDataset = ParametricDatasetWrapper(ValDataset)
         n_pixels_z = 1
+        n_input += 1
         parametric_slices = TrainDataset.parametric_slices
 
     print(f"[Rank{rank}] finished setting up data loaders")
@@ -755,9 +756,9 @@ def main(args: argparse.Namespace) -> None:
                         raise Exception(f"Model returned an unexpected value: {type(output)}")
 
                     if n_dims == 2:
-                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x)
+                        val_images = output.view(-1, n_channels, n_pixels_y, n_pixels_x)
                     elif n_dims == 3:
-                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x, n_pixels_z)
+                        val_images = output.view(-1, n_channels, n_pixels_y, n_pixels_x, n_pixels_z)
                     else:
                         raise Exception(f"Invalid number of dimensions: {n_dims}")
 
