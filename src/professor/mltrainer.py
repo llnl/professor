@@ -2,6 +2,7 @@
 # contributors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+from __future__ import annotations
 import os
 import multiprocessing
 import glob
@@ -183,6 +184,32 @@ class CompleteDatasetRandom(Dataset[Any]):
         self.pixels_x = y.shape[2]
         if len(y.shape) == 4:
             self.pixels_z = y.shape[3]
+
+
+class ParametricDatasetWrapper(Dataset[Any]):
+    def __init__(
+        self,
+        child_dataset: CompleteDataset | CompleteDatasetOneFileSims | CompleteDatasetDivideScaling | CompleteDatasetRandom
+    ):
+        self.child_dataset: CompleteDataset | CompleteDatasetOneFileSims | CompleteDatasetDivideScaling | CompleteDatasetRandom = child_dataset
+        self.n_input: int = self.child_dataset.n_input + 1
+        self.pixels_y: int = self.child_dataset.pixels_y
+        self.pixels_x: int = self.child_dataset.pixels_x
+        self.pixels_z: int = 1
+        self.parametric_slices: int = self.child_dataset.pixels_z
+        self._length: int = len(self.child_dataset) * self.parametric_slices
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        child_id = i // self.parametric_slices
+        slice_id = i % self.parametric_slices
+        x, y = self.child_dataset[child_id]
+
+        z = torch.Tensor([float(slice_id) / self.parametric_slices])
+        xp = torch.cat([x, z.view(1, 1, 1)], dim=0)
+        return xp, y[..., slice_id]
 
 
 def main(args: argparse.Namespace) -> None:
@@ -396,6 +423,14 @@ def main(args: argparse.Namespace) -> None:
     else:
         raise Exception(f"Unrecognized dataset type: {args.dataset_type}")
 
+    # Check to see if the dataset should be sliced along the z-axis
+    parametric_slices: int = 0
+    if (n_pixels_z > 1) and ('3D' not in args.generator_type):
+        TrainDataset = ParametricDatasetWrapper(TrainDataset)
+        ValDataset = ParametricDatasetWrapper(ValDataset)
+        n_pixels_z = 1
+        parametric_slices = TrainDataset.parametric_slices
+
     print(f"[Rank{rank}] finished setting up data loaders")
     COMM.Barrier()
 
@@ -524,6 +559,7 @@ def main(args: argparse.Namespace) -> None:
             x_pixels=n_pixels_x,
             y_pixels=n_pixels_y,
             z_pixels=n_pixels_z,
+            parametric_slices=parametric_slices,
             min_features=args.min_feature,
             max_features=args.max_feature,
             x_kernel=args.x_kernel,
@@ -534,7 +570,7 @@ def main(args: argparse.Namespace) -> None:
             generator_type=args.generator_type,
             act_fun=args.act_fun,
             upscale_type=args.upscale_type,
-            residual=args.residual,
+            residual=args.residual
         )
 
     # try to free up gpu memory

@@ -746,6 +746,28 @@ class Generator3DVoxel(nn.Module):
         return self.main(x)
 
 
+class GeneratorParametricWrapper(nn.Module):
+    def __init__(
+        self,
+        base_generator: nn.Module,
+        parametric_slices: int
+    ) -> None:
+        """
+        Wrapper for parameteric generator models that will convert 2D slices into 3D volumes
+        """
+        super().__init__()
+        self.base_generator: nn.Module = base_generator
+        self.parametric_slices: int = parametric_slices
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        cols = []
+        for ii in range(self.parametric_slices):
+            z = torch.Tensor([float(ii) / self.parametric_slices])
+            xp = torch.cat([input, z.view(1, 1, 1)], dim=0)
+            cols.append(self.base_generator(xp))
+        return torch.stack(cols)
+
+
 class GenSubPixelConv(nn.Module):
     def __init__(
         self,

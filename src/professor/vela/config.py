@@ -43,6 +43,7 @@ class Keys(Enum):
     PARAMS = "params"
     EXECUTION = "execution"
     HALF_PRECISION = "half_precision"
+    PARAMETRIC_SLICES = "parametric_slices"
     JIT = "jit"
 
     GUI = "gui"
@@ -245,6 +246,7 @@ class ExecutionSchema(VelaSchema):
             {
                 Optional(Keys.HALF_PRECISION.value, default=True): bool,
                 Optional(Keys.JIT.value, default=True): bool,
+                Optional(Keys.PARAMETRIC_SLICES.value, default=0): int,
             }
             # fmt: on
         )
@@ -502,6 +504,9 @@ class Config:
         self.jit: bool = self.execution[Keys.JIT.value]
         logger.debug(f"{Keys.JIT.value}: {self.jit}")
 
+        self.parametric_slices: int = self.execution[Keys.PARAMETRIC_SLICES.value]
+        logger.debug(f"{Keys.PARAMETRIC_SLICES.value}: {self.parametric_slices}")
+
         self.gui_type: str = self.get_top_level_key_name(gui=True)
         self.gui: Dict[str, Any] = self.full[Keys.GUI.value][self.gui_type]
         logger.debug(f"{self.gui_type}: {self.model}")
@@ -646,6 +651,7 @@ def build_template_config(
     x_pixels: int = 512,
     y_pixels: int = 512,
     z_pixels: int = 1,
+    parametric_slices: int = 0,
     min_features: int = 128,
     max_features: int = 1024,
     x_kernel: int = 4,
@@ -703,6 +709,9 @@ def build_template_config(
     if generator_type == "3D-spectral":
         # Note: some layers in this model type do not support half precision
         conf["model"]["pytorch"]["execution"]["half_precision"] = False
+
+    if parametric_slices > 1:
+        conf["model"]["pytorch"]["execution"]["parametric_slices"] = parametric_slices
 
     # Set fields and sliders
     conf["gui"]["napari"]["fields"] = fields
