@@ -238,7 +238,7 @@ class PyTorchModel(Model):
 
             self._set_half_precision(self.models[i])
             self._set_jit_tracing(self.models[i])
-            self._set_parametric_slices(self.models[i])
+            self.models[i].image = self._evaluate_model_image(self.models[i])
 
     @property
     def num_gpus(self) -> int:
@@ -262,7 +262,8 @@ class PyTorchModel(Model):
         # NOTE: There is a bug reported specifically for the RadioConvPixelShuffel model
         # where you have to make a forward call in the cpu before being able
         # to move to the gpu. This doesn't seem to break the other models.
-        X_val = torch.zeros(1, self._config.n_inputs, 1, 1).to("cpu")
+        n_parametric = int(self._config.parametric_slices > 1)
+        X_val = torch.zeros(1, self._config.n_inputs + n_parametric, 1, 1).to("cpu")
         model(X_val)
 
         model.to(device)
@@ -283,14 +284,13 @@ class PyTorchModel(Model):
 
         model.load_state_dict(new_state_dict, strict=True)
         model = model.eval()
+        if self._config.parametric_slices > 1:
+            model = GeneratorParametricWrapper(model, self._config.parametric_slices).eval()
 
         return model
 
     def _get_tensor(self, device: torch.device):
         tensor = torch.tensor(self._config.slider_initial_values).float()
-        if self._config.parametric_slices > 1:
-            tensor = torch.cat([tensor, torch.zeros(1)])
-
         return tensor.view(1, -1, 1, 1).to(device)
 
     def _set_seed(self):
@@ -319,10 +319,16 @@ class PyTorchModel(Model):
             with torch.no_grad():
                 _ = current_model.ref(current_model.tensor)
 
-    def _set_parametric_slices(self, current_model: ModelCollection):
-        if self._config.parametric_slices > 1:
-            logger.info(f"Configuring model to use {self._config.parametric_slices} slices")
-            current_model.ref = GeneratorParametricWrapper(current_model.ref, self._config.parametric_slices)
+    def _evaluate_model_image(self, current_model: ModelCollection) -> torch.Tensor:
+        with torch.no_grad():
+            image = current_model.ref(current_model.tensor)
+            if self._config.reflect:
+                if self._config.flip_y:
+                    image = vflip(image)
+                image = torch.cat((vflip(image[:, :, 1:, :]), image), dim=2)
+            elif self._config.flip_y:
+                image = vflip(image)
+        return self._move_tensor_to_cpu(image)
 
     def _move_tensor_to_cpu(self, tensor: torch.Tensor) -> torch.Tensor:
         t = tensor.detach().cpu()
