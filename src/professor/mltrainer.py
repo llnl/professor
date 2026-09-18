@@ -502,7 +502,12 @@ def main(args: argparse.Namespace) -> None:
     if args.vis_config and rank == 0:
         # TODO: Estimate these values from the training data
         model_name = "Professor Model"
-        model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_input)]
+        n_slider_inputs = n_input
+        if parametric_slices > 1:
+            # The final model input is the synthetic z coordinate, not a user
+            # parameter. The visualization model appends it during inference.
+            n_slider_inputs -= 1
+        model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_slider_inputs)]
 
         build_template_config(
             config_fname=args.vis_config,

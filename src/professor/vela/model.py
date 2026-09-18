@@ -239,6 +239,7 @@ class PyTorchModel(Model):
             self._set_half_precision(self.models[i])
             self._set_jit_tracing(self.models[i])
             self._set_parametric_slices(self.models[i])
+            self.models[i].image = self._evaluate_model_image(self.models[i])
 
     @property
     def num_gpus(self) -> int:
@@ -323,6 +324,18 @@ class PyTorchModel(Model):
         if self._config.parametric_slices > 1:
             logger.info(f"Configuring model to use {self._config.parametric_slices} slices")
             current_model.ref = GeneratorParametricWrapper(current_model.ref, self._config.parametric_slices)
+            current_model.ref.eval()
+
+    def _evaluate_model_image(self, current_model: ModelCollection) -> torch.Tensor:
+        with torch.no_grad():
+            image = current_model.ref(current_model.tensor)
+            if self._config.reflect:
+                if self._config.flip_y:
+                    image = vflip(image)
+                image = torch.cat((vflip(image[:, :, 1:, :]), image), dim=2)
+            elif self._config.flip_y:
+                image = vflip(image)
+        return self._move_tensor_to_cpu(image)
 
     def _move_tensor_to_cpu(self, tensor: torch.Tensor) -> torch.Tensor:
         t = tensor.detach().cpu()
