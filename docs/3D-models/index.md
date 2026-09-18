@@ -30,6 +30,20 @@ same channel and spatial dimensions as the target. This makes it straightforward
 to train both and compare accuracy, memory use, and throughput on the same
 dataset.
 
+### Parametric 2D alternative
+
+For a lower-memory alternative, a `legacy` or `2D` generator can learn a 3D
+dataset as a collection of z-conditioned 2D slices. During training, Professor
+reads one z plane at a time and adds its normalized z position as an additional
+model input. During visualization, the wrapper evaluates all z positions and
+reconstructs the 3D volume. This approach uses a 2D model and is often less
+expensive than a native 3D generator, but it does not model neighboring z
+planes directly.
+
+The parametric mode is selected automatically when the dataset is 3D and the
+chosen generator is not a native `3D` generator. No change to the HDF5 layout
+is required.
+
 The final section uses Professor's Dash-based web GUI to explore orthogonal
 slices or a volume rendering while interactively changing the model inputs.
 
