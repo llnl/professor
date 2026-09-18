@@ -238,6 +238,7 @@ class PyTorchModel(Model):
 
             self._set_half_precision(self.models[i])
             self._set_jit_tracing(self.models[i])
+            self._set_parametric_slices(self.models[i])
 
     @property
     def num_gpus(self) -> int:
@@ -261,7 +262,11 @@ class PyTorchModel(Model):
         # NOTE: There is a bug reported specifically for the RadioConvPixelShuffel model
         # where you have to make a forward call in the cpu before being able
         # to move to the gpu. This doesn't seem to break the other models.
-        X_val = torch.zeros(1, self._config.n_inputs, 1, 1).to("cpu")
+        n_parametric = 0
+        if self._config.parametric_slices > 1:
+            n_parametric = 1
+
+        X_val = torch.zeros(1, self._config.n_inputs + n_parametric, 1, 1).to("cpu")
         model(X_val)
 
         model.to(device)
