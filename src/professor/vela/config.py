@@ -669,8 +669,6 @@ def build_template_config(
     dims["n_inputs"] = n_inputs
     dims["x_pixels"] = x_pixels
     dims["y_pixels"] = y_pixels
-    if z_pixels:
-        dims["z_pixels"] = z_pixels
 
     available_generators = {
         "legacy": "professor.torch_models.Generator",
@@ -681,13 +679,6 @@ def build_template_config(
     }
     conf["model"]["pytorch"]["invocation"]["target"] = available_generators[generator_type]
 
-    if "3D" in generator_type:
-        conf["model"]["pytorch"]["invocation"]["params"]["last_layer"]["invocation"]["params"]["n_dims"] = 3
-
-    # Note: some layers in this model type do not support half precision
-    if generator_type == "3D-spectral":
-        conf["model"]["pytorch"]["execution"]["half_precision"] = False
-
     params = conf["model"]["pytorch"]["invocation"]["params"]
     params["num_channels"] = n_channels
     params["min_features"] = min_features
@@ -696,16 +687,25 @@ def build_template_config(
     params["y_kernel"] = y_kernel
     params["act_fun"] = act_fun
 
-    if z_kernel:
-        params["z_kernel"] = z_kernel
-
+    # Save generator specific options
     if generator_type in ["2D", "3D-triplane", "3D-spectral", "3D-voxel"]:
         params["upscale_type"] = upscale_type
         params["residual"] = residual
+
+    if generator_type in ["3D-triplane", "3D-spectral", "3D-voxel"]:
+        dims["z_pixels"] = z_pixels
+        params["z_kernel"] = z_kernel
+        conf["model"]["pytorch"]["invocation"]["params"]["last_layer"]["invocation"]["params"]["n_dims"] = 3
+
+    if generator_type in ["3D-triplane"]:
         params["intermediate_channels"] = intermediate_channels
 
-    conf["gui"]["napari"]["fields"] = fields
+    if generator_type == "3D-spectral":
+        # Note: some layers in this model type do not support half precision
+        conf["model"]["pytorch"]["execution"]["half_precision"] = False
 
+    # Set fields and sliders
+    conf["gui"]["napari"]["fields"] = fields
     sliders = conf["gui"]["napari"]["sliders"]
     for param_name, param_min, param_max in input_parameters:
         sliders[param_name] = {

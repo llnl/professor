@@ -162,6 +162,7 @@ class Generator(nn.Module):
         x_kernel: int = 4,
         act_fun: str = "ReLU",
         last_bias: bool = False,
+        **_,
     ) -> None:
         super(Generator, self).__init__()
         self.activation_functions: Dict[str, nn.Module] = {
@@ -261,6 +262,7 @@ class Generator2D(nn.Module):
         upscale_type: str = "nearest",
         residual: bool = False,
         last_bias: bool = False,
+        **_,
     ) -> None:
         super().__init__()
 
@@ -442,6 +444,7 @@ class Generator3DTriplane(nn.Module):
         residual: bool = False,
         act_fun: str = "ReLU",
         last_bias: bool = False,
+        **_,
     ) -> None:
         """
         Generator that uses three 2D child generators and a
@@ -552,6 +555,7 @@ class Generator3DSpectral(nn.Module):
         residual: bool = False,
         act_fun: str = "ReLU",
         last_bias: bool = False,
+        **_,
     ) -> None:
         """
         Generator that uses a dense 3D generator to estimate a 3D field.
@@ -661,6 +665,7 @@ class Generator3DVoxel(nn.Module):
         residual: bool = False,
         act_fun: str = "ReLU",
         last_bias: bool = False,
+        **_,
     ) -> None:
         """
         Generator that uses a dense 3D generator to estimate a 3D field.
