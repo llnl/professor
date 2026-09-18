@@ -14,6 +14,7 @@ from professor.vela.utils import (
     get_object_reference,
     initialize_function_calls_in_parameters,
 )
+from professor.torch_models import GeneratorParametricWrapper
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -313,6 +314,11 @@ class PyTorchModel(Model):
             logger.info(f"Jit tracing will not be performe for model on {current_model.device}")
             with torch.no_grad():
                 _ = current_model.ref(current_model.tensor)
+
+    def _set_parametric_slices(self, current_model: ModelCollection):
+            if self._config.parametric_slices > 1:
+                logger.info(f"Configuring model to use {self._config.parametric_slices} slices")
+                current_model.ref = GeneratorParametricWrapper(current_model.ref, self._config.parametric_slices)
 
     def _move_tensor_to_cpu(self, tensor: torch.Tensor) -> torch.Tensor:
         t = tensor.detach().cpu()

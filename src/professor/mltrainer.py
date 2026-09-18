@@ -242,6 +242,32 @@ class CompleteDatasetRandom(Dataset[Any]):
             self.pixels_z = y.shape[3]
 
 
+class ParametricDatasetWrapper(Dataset[Any]):
+    def __init__(self, child_dataset: Dataset[Any]):
+        self.child_dataset = child_dataset
+        self.n_input = child_dataset.n_input + 1
+        self.pixels_y = child_dataset.pixels_y
+        self.pixels_x = child_dataset.pixels_x
+        self.pixels_z = 1
+        self.parametric_slices = child_dataset.pixels_z
+        self._length = len(child_dataset) * self.parametric_slices
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, ...]:
+        child_id = i // self.parametric_slices
+        slice_id = i % self.parametric_slices
+        item = self.child_dataset[child_id]
+        x, y = item[:2]
+        z = torch.tensor([float(slice_id) / self.parametric_slices], dtype=x.dtype)
+        xp = torch.cat([x, z.view(1, 1, 1)], dim=0)
+        sliced_y = y[..., slice_id]
+        if len(item) == 2:
+            return xp, sliced_y
+        return xp, sliced_y, item[2][..., slice_id]
+
+
 def _float_list(value: str) -> list[float]:
     return [float(v) for v in value.split(",")] if value else []
 
@@ -479,6 +505,13 @@ def main(args: argparse.Namespace) -> None:
         )
     else:
         raise Exception(f"Unrecognized dataset type: {args.dataset_type}")
+
+    parametric_slices = 0
+    if n_pixels_z > 1 and "3D" not in args.generator_type:
+        TrainDataset = ParametricDatasetWrapper(TrainDataset)
+        ValDataset = ParametricDatasetWrapper(ValDataset)
+        n_pixels_z = 1
+        parametric_slices = TrainDataset.parametric_slices
 
     print(f"[Rank{rank}] finished setting up data loaders")
     COMM.Barrier()
@@ -776,6 +809,7 @@ def main(args: argparse.Namespace) -> None:
             x_pixels=n_pixels_x,
             y_pixels=n_pixels_y,
             z_pixels=n_pixels_z,
+            parametric_slices=parametric_slices,
             min_features=args.min_feature,
             max_features=args.max_feature,
             x_kernel=args.x_kernel,
