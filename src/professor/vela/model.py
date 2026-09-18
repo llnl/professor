@@ -262,11 +262,7 @@ class PyTorchModel(Model):
         # NOTE: There is a bug reported specifically for the RadioConvPixelShuffel model
         # where you have to make a forward call in the cpu before being able
         # to move to the gpu. This doesn't seem to break the other models.
-        n_parametric = 0
-        if self._config.parametric_slices > 1:
-            n_parametric = 1
-
-        X_val = torch.zeros(1, self._config.n_inputs + n_parametric, 1, 1).to("cpu")
+        X_val = torch.zeros(1, self._config.n_inputs, 1, 1).to("cpu")
         model(X_val)
 
         model.to(device)
@@ -292,6 +288,9 @@ class PyTorchModel(Model):
 
     def _get_tensor(self, device: torch.device):
         tensor = torch.tensor(self._config.slider_initial_values).float()
+        if self._config.parametric_slices > 1:
+            tensor = torch.cat([tensor, torch.zeros(1)])
+
         return tensor.view(1, -1, 1, 1).to(device)
 
     def _set_seed(self):

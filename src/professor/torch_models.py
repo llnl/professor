@@ -758,7 +758,7 @@ class GeneratorParametricWrapper(nn.Module):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         cols = []
         for z in torch.arange(0, 1.0 - 1e-10, 1.0 / self.parametric_slices, dtype=input.dtype, device=input.device):
-            xp = torch.cat([input, z.view(1, 1, 1, 1)], dim=0)
+            xp = torch.cat([input, z.view(1, 1, 1, 1)], dim=1)
             cols.append(self.base_generator(xp))
         return torch.stack(cols)
 
