@@ -747,20 +747,48 @@ class Generator3DVoxel(nn.Module):
 
 
 class GeneratorParametricWrapper(nn.Module):
-    def __init__(self, base_generator: nn.Module, parametric_slices: int) -> None:
+    def __init__(self, base_generator: nn.Module, parametric_slices: int, batched: bool = True) -> None:
         """
         Wrapper for parameteric generator models that will convert 2D slices into 3D volumes
         """
         super().__init__()
         self.base_generator: nn.Module = base_generator
         self.parametric_slices: int = parametric_slices
+        self.batched: bool = batched
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.batched:
+            return self._forward_batched(input)
+        return self._forward_iterative(input)
+
+    def _z_values(self, input: torch.Tensor) -> torch.Tensor:
+        return (
+            torch.arange(
+                self.parametric_slices,
+                dtype=input.dtype,
+                device=input.device,
+            )
+            / self.parametric_slices
+        )
+
+    def _forward_batched(self, input: torch.Tensor) -> torch.Tensor:
+        batch_size = input.shape[0]
+        z_values = self._z_values(input)
+        tiled_input = input.repeat_interleave(self.parametric_slices, dim=0)
+        tiled_z = z_values.repeat(batch_size).view(-1, 1, 1, 1)
+        model_input = torch.cat([tiled_input, tiled_z], dim=1)
+        output = self.base_generator(model_input)
+        output = output.reshape(batch_size, self.parametric_slices, *output.shape[1:])
+        return output.permute(0, 2, 3, 4, 1).contiguous()
+
+    def _forward_iterative(self, input: torch.Tensor) -> torch.Tensor:
+        batch_size = input.shape[0]
         cols = []
-        for z in torch.arange(0, 1.0 - 1e-10, 1.0 / self.parametric_slices, dtype=input.dtype, device=input.device):
-            xp = torch.cat([input, z.view(1, 1, 1, 1)], dim=1)
-            cols.append(self.base_generator(xp))
-        return torch.stack(cols)
+        for z in self._z_values(input):
+            z_input = z.expand(batch_size, 1, 1, 1)
+            model_input = torch.cat([input, z_input], dim=1)
+            cols.append(self.base_generator(model_input))
+        return torch.stack(cols, dim=-1)
 
 
 class GenSubPixelConv(nn.Module):

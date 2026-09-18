@@ -4,10 +4,12 @@
 
 # import os
 import unittest
+
 import numpy as np
 import torch
-from professor.torch_models import Generator
 from torchinfo import summary  # noqa F:401
+
+from professor.torch_models import Generator, GeneratorParametricWrapper
 
 # set random seed
 np.random.seed(1231231)
@@ -19,6 +21,30 @@ torch.manual_seed(1231231)
 
 
 class TestEverything(unittest.TestCase):
+    def test_parametric_wrapper_batched_matches_iterative(self):
+        class MockGenerator(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.batch_sizes = []
+
+            def forward(self, x):
+                self.batch_sizes.append(x.shape[0])
+                z = x[:, -1:].expand(-1, 1, 2, 3)
+                return z + x[:, :1].expand(-1, 1, 2, 3)
+
+        inputs = torch.tensor([[[[1.0]]], [[[2.0]]]])
+        batched_base = MockGenerator()
+        iterative_base = MockGenerator()
+        batched = GeneratorParametricWrapper(batched_base, 3)
+        iterative = GeneratorParametricWrapper(iterative_base, 3, batched=False)
+
+        batched_output = batched(inputs)
+        iterative_output = iterative(inputs)
+
+        self.assertEqual(batched_output.shape, (2, 1, 2, 3, 3))
+        torch.testing.assert_close(batched_output, iterative_output)
+        self.assertEqual(batched_base.batch_sizes, [6])
+        self.assertEqual(iterative_base.batch_sizes, [2, 2, 2])
 
     def test_model_output(self):
         im_sizes = [128, 256, 512, 1024]
@@ -26,7 +52,6 @@ class TestEverything(unittest.TestCase):
         X = torch.rand(2, 4, 1, 1)  # batch size  # random inputs
         for kernel in kernels:
             for im_size in im_sizes:
-
                 model = Generator(4, im_size, 1, y_kernel=kernel, x_kernel=kernel)
                 Y = model(X)
                 # summary(model, input_size=(1, 4, 1, 1))
