@@ -139,14 +139,22 @@ class Model(ABC):
                 device = self._get_checkpoint_device(device_id)
                 model = self._load_model(self._get_model_ref(), path, device)
                 tensor = self._get_tensor(device)
+                filled_tensor = tensor.clone().detach()
+
+                # Note: this occurs before the optional parametric wrapper is applied
+                #       so make sure that the tensor size is correct
+                if self._config.parametric_slices > 1:
+                    z = torch.zeros(1, dtype=tensor.dtype, device=tensor.device)
+                    filled_tensor = torch.cat([tensor, z.view(1, 1, 1, 1)], dim=1)
+
                 with torch.no_grad():
                     if self._config.reflect:
-                        image = model(tensor)
+                        image = model(filled_tensor)
                         if self._config.flip_y:
                             image = vflip(image)
                         image = torch.cat((vflip(image[:, :, 1:, :]), image), dim=2)
                     else:
-                        image = model(tensor)
+                        image = model(filled_tensor)
                         if self._config.flip_y:
                             image = vflip(image)
                 image = self._move_tensor_to_cpu(image)
@@ -236,9 +244,9 @@ class PyTorchModel(Model):
             # c = self.CHECKPOINT_STR + str(i)
             # current_checkpoint = self.__dict__[c]
 
+            self._set_parametric_slices(self.models[i])
             self._set_half_precision(self.models[i])
             self._set_jit_tracing(self.models[i])
-            self._set_parametric_slices(self.models[i])
             self.models[i].image = self._evaluate_model_image(self.models[i])
 
     @property
@@ -289,9 +297,6 @@ class PyTorchModel(Model):
 
     def _get_tensor(self, device: torch.device):
         tensor = torch.tensor(self._config.slider_initial_values).float()
-        if self._config.parametric_slices > 1:
-            tensor = torch.cat([tensor, torch.zeros(1)])
-
         return tensor.view(1, -1, 1, 1).to(device)
 
     def _set_seed(self):
