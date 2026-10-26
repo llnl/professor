@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import argparse
-import professor
 
+import professor
 
 GENERATOR_ACTIVATION_FUNCTIONS = (
     "ReLU",
@@ -28,7 +28,7 @@ GENERATOR_TYPES = (
 )
 
 
-def prof_trainer() -> None:
+def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="prof-trainer",
@@ -78,19 +78,19 @@ def prof_trainer() -> None:
         "--max_feature",
         default=512,
         type=int,
-        help="Maximum number of channels in the intermediate state of the model.",  # noqa E501
+        help="Maximum number of channels in the intermediate state of the model.",
     )
     parser.add_argument(
         "--min_feature",
         default=32,
         type=int,
-        help="Minimum number of channels in the intermediate state of the model.",  # noqa E501
+        help="Minimum number of channels in the intermediate state of the model.",
     )
     parser.add_argument(
         "--restart_model",
         default="",
         type=str,
-        help="The absolute file path to a previous model checkpoint '.pt' file.",  # noqa E501
+        help="The absolute file path to a previous model checkpoint '.pt' file.",
     )
     parser.add_argument(
         "--keys",
@@ -166,13 +166,13 @@ def prof_trainer() -> None:
         "--dataloader_workers",
         type=int,
         default=6,
-        help="The number of threads to use on each rank to stream the data from disk to RAM.",  # noqa E501
+        help="The number of threads to use on each rank to stream the data from disk to RAM.",
     )
     parser.add_argument(
         "--divide_input_scale",
         default="1,1,1,1",
         type=str,
-        help="Comma separated list to divide each input by. Only used on type 2 dataset",  # noqa E501
+        help="Comma separated list to divide each input by. Only used on type 2 dataset",
     )
     parser.add_argument(
         "--n_sims",
@@ -195,6 +195,11 @@ def prof_trainer() -> None:
     )
     parser.add_argument("--compile", action="store_true", help="Whether to use torch.compile to optimize the module.")
     parser.add_argument("--vis-config", type=str, default="", help="Build a template visualization config file.")
+    return parser
+
+
+def prof_trainer() -> None:
+    parser = build_parser()
     args = parser.parse_args()
 
     from professor.mltrainer import main

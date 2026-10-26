@@ -19,14 +19,12 @@ torch.manual_seed(1231231)
 
 
 class TestEverything(unittest.TestCase):
-
     def test_model_output(self):
         im_sizes = [128, 256, 512, 1024]
         kernels = [1, 2, 4, 8]
         X = torch.rand(2, 4, 1, 1)  # batch size  # random inputs
         for kernel in kernels:
             for im_size in im_sizes:
-
                 model = Generator(4, im_size, 1, y_kernel=kernel, x_kernel=kernel)
                 Y = model(X)
                 # summary(model, input_size=(1, 4, 1, 1))

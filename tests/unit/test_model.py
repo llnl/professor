@@ -8,6 +8,5 @@
 
 
 class TestModelCollection:
-
     def test_normal_case(self):
         pass
