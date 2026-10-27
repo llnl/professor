@@ -502,19 +502,25 @@ class Generator3DTriplane(nn.Module):
             residual=residual,
         )
 
-        self.reconstruction_layers = nn.Sequential(
+        reconstruction_layers: list[nn.Module] = [
             nn.Conv3d(
                 in_channels=3 * intermediate_channels,
                 out_channels=3 * intermediate_channels,
                 kernel_size=(3, 3, 3),
                 padding="same",
             ),
-            nn.BatchNorm3d(3 * intermediate_channels),
-            build_activation(act_fun),
-            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=num_channels, kernel_size=1),
-            nn.BatchNorm3d(num_channels),
-            build_activation(act_fun),
+        ]
+        if use_batch_norm:
+            reconstruction_layers.append(nn.BatchNorm3d(3 * intermediate_channels))
+        reconstruction_layers.append(build_activation(act_fun))
+        reconstruction_layers.append(
+            nn.Conv3d(in_channels=3 * intermediate_channels, out_channels=num_channels, kernel_size=1)
         )
+        if use_batch_norm:
+            reconstruction_layers.append(nn.BatchNorm3d(num_channels))
+        reconstruction_layers.append(build_activation(act_fun))
+
+        self.reconstruction_layers = nn.Sequential(*reconstruction_layers)
         self.last_layer = last_layer
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
