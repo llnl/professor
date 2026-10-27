@@ -167,8 +167,10 @@ This DDP training is a weak scaling process. If you have 10x more data, then you
 usage: prof-trainer [-h] [--batch_size BATCH_SIZE] [--lr LR] [--num_epochs NUM_EPOCHS] [--seed SEED] [--n_checkpoint N_CHECKPOINT]
                     [--loss_target LOSS_TARGET] [--max_feature MAX_FEATURE] [--min_feature MIN_FEATURE] [--restart_model RESTART_MODEL] [--keys KEYS]
                     [--dataset_path DATASET_PATH] [--dataset_type DATASET_TYPE] [--dataset_file DATASET_FILE] [--y_kernel Y_KERNEL]
-                    [--x_kernel X_KERNEL] [--dataloader_workers DATALOADER_WORKERS] [--divide_input_scale DIVIDE_INPUT_SCALE] [--n_sims N_SIMS]
-                    [--run_directory RUN_DIRECTORY]
+                    [--x_kernel X_KERNEL] [--dataloader_workers DATALOADER_WORKERS] [--divide_input_scale DIVIDE_INPUT_SCALE]
+                    [--field_scaling {none,std}] [--field_offset FIELD_OFFSET] [--field_scale FIELD_SCALE]
+                    [--input_scaling {none,minmax}] [--input_offset INPUT_OFFSET] [--input_scale INPUT_SCALE] [--log_inputs LOG_INPUTS]
+                    [--scaling_samples SCALING_SAMPLES] [--n_sims N_SIMS] [--run_directory RUN_DIRECTORY]
 ```
 
 Here is a description of each command line argument
@@ -194,6 +196,12 @@ Here is a description of each command line argument
 -   `no-batch-norm` (optional) Build the generator without batch normalization. Batch statistics couple the samples of a batch, so without them the model does not depend on the per-GPU batch size.
 -   `dataloader_workers` (optional) The number of threads to use on each rank to stream the data from disk to RAM.
 -   `divide_input_scale` (optional) A comma separated list to divide each input by. This is only used for dataset type 2. 
+-   `field_scaling` (optional) Scale each field to order 1 inside the model. With 'std', the last layer of the model maps its output y to y * std + mean, with the mean and standard deviation of each field over `scaling_samples` training samples, so the rest of the network works on fields of order 1 even when the fields have very different magnitudes. The model output, the checkpoints and the logged errors stay in the units of the dataset, while the training loss is the error of the scaled fields, so each field counts about equally. Default is 'none', which leaves the model unchanged.
+-   `field_offset`, `field_scale` (optional) Comma separated values, one per field, for the field scaling, used in place of the mean and standard deviation (e.g. to reuse the values of an earlier run). Either one turns on field scaling. A list that starts with a negative value must be attached with `=` (`--field_offset=-1,0`).
+-   `input_scaling` (optional) Scale each input to order 1 inside the model. With 'minmax', the first layer of the model maps the range of each input over `scaling_samples` training samples to [-1, 1]. The model still takes the raw inputs, so `prof-vis` needs no extra steps, and the sliders of the `--vis-config` file cover the range of the training data. Default is 'none'.
+-   `input_offset`, `input_scale` (optional) Comma separated values, one per input, for the input scaling, (input - offset) / scale, used in place of the center and half range of the data. Either one turns on input scaling. A list that starts with a negative value must be attached with `=` (`--input_offset=-8.7,-3.3`), or argparse reads it as an option.
+-   `log_inputs` (optional) Comma separated indices of inputs to take the log of before the input scaling, for inputs that are positive and span orders of magnitude. Turns on input scaling.
+-   `scaling_samples` (optional) The number of evenly spaced training samples to compute the field and input scaling from. They are read once at startup, shared over the ranks. On restart, the scaling comes from the checkpoint. Default is 1024.
 -   `n_sims` The total number of image arrays in your dataset. This is useful for debugging, as you can set this number to be smaller than your dataset to step through smaller epochs quicker. Usually you set this to number to a value much larger number than your dataset
 -   `run_directory` (optional) The absolute path to a run directory that will write out model checkpoints and tensorboard results. Use of this folder will trigger a check of existing checkpoints. If checkpoints exist the model will restart from the latest checkpoint.
 

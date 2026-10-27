@@ -193,6 +193,63 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma separated list to divide each input by. Only used on type 2 dataset",
     )
     parser.add_argument(
+        "--field_scaling",
+        default="none",
+        choices=("none", "std"),
+        help="Scale each field to order 1 inside the model. 'std' subtracts the mean and divides by the"
+        " standard deviation of each field in the training data. The model output and the logged errors"
+        " stay in the units of the dataset; the training loss is on the scaled fields. Default is 'none'.",
+    )
+    parser.add_argument(
+        "--field_offset",
+        default="",
+        type=str,
+        help="Comma separated per-field offsets for the field scaling, (field - offset) / scale."
+        " Turns on field scaling and replaces the computed means. Use --field_offset=-1,... when the"
+        " first value is negative.",
+    )
+    parser.add_argument(
+        "--field_scale",
+        default="",
+        type=str,
+        help="Comma separated per-field scales for the field scaling. Turns on field scaling and"
+        " replaces the computed standard deviations.",
+    )
+    parser.add_argument(
+        "--input_scaling",
+        default="none",
+        choices=("none", "minmax"),
+        help="Scale each input to order 1 inside the model. 'minmax' maps the range of each input in"
+        " the training data (after --log_inputs) to [-1, 1]. Default is 'none'.",
+    )
+    parser.add_argument(
+        "--input_offset",
+        default="",
+        type=str,
+        help="Comma separated per-input offsets for the input scaling, (input - offset) / scale."
+        " Turns on input scaling and replaces the computed centers. Use --input_offset=-1,... when the"
+        " first value is negative.",
+    )
+    parser.add_argument(
+        "--input_scale",
+        default="",
+        type=str,
+        help="Comma separated per-input scales for the input scaling. Turns on input scaling and"
+        " replaces the computed half ranges.",
+    )
+    parser.add_argument(
+        "--log_inputs",
+        default="",
+        type=str,
+        help="Comma separated indices of (positive) inputs to take the log of before the input scaling.",
+    )
+    parser.add_argument(
+        "--scaling_samples",
+        default=1024,
+        type=int,
+        help="Number of training samples to estimate the field and input scaling from. Default is 1024.",
+    )
+    parser.add_argument(
         "--n_sims",
         type=int,
         default=1000,

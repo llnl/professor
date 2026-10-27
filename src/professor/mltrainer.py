@@ -14,8 +14,8 @@ import torch
 import torch.nn as nn
 from torch.profiler import profile, record_function, ProfilerActivity
 import professor
-from professor.utils import consolidated_loss, last_checkpoint
-from professor.layers import AlphaLinear
+from professor.utils import consolidated_loss, last_checkpoint, scaling_statistics
+from professor.layers import AlphaLinear, ScaledAlphaLinear, InputScaling
 from professor.torch_models import build_generator
 from professor.vela.config import build_template_config, update_config_checkpoint
 from torch.distributed.optim import ZeroRedundancyOptimizer
@@ -181,6 +181,10 @@ class CompleteDatasetRandom(Dataset[Any]):
         self.pixels_x = y.shape[2]
         if len(y.shape) == 4:
             self.pixels_z = y.shape[3]
+
+
+def _float_list(value: str) -> list[float]:
+    return [float(v) for v in value.split(",")] if value else []
 
 
 def main(args: argparse.Namespace) -> None:
@@ -417,7 +421,62 @@ def main(args: argparse.Namespace) -> None:
         n_dims = 3
         n_pixels = max(n_pixels, n_pixels_z)
 
-    finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
+    # Optional scaling of the fields and inputs to order 1 inside the model. The model still
+    # maps raw inputs to fields in the units of the dataset, so prof-vis needs no extra steps.
+    field_scaling = getattr(args, "field_scaling", "none")
+    field_offset = _float_list(getattr(args, "field_offset", ""))
+    field_scale = _float_list(getattr(args, "field_scale", ""))
+    input_scaling = getattr(args, "input_scaling", "none")
+    input_offset = _float_list(getattr(args, "input_offset", ""))
+    input_scale = _float_list(getattr(args, "input_scale", ""))
+    log_inputs = [int(v) for v in _float_list(getattr(args, "log_inputs", ""))]
+    use_field_scaling = field_scaling != "none" or len(field_offset) > 0 or len(field_scale) > 0
+    use_input_scaling = input_scaling != "none" or len(input_offset) > 0 or len(input_scale) > 0 or len(log_inputs) > 0
+    if field_scaling not in ("none", "std"):
+        raise ValueError(f"Unrecognized field scaling: {field_scaling}")
+    if input_scaling not in ("none", "minmax"):
+        raise ValueError(f"Unrecognized input scaling: {input_scaling}")
+    for name, values, n_values in (
+        ("field_offset", field_offset, n_channels),
+        ("field_scale", field_scale, n_channels),
+        ("input_offset", input_offset, n_input),
+        ("input_scale", input_scale, n_input),
+    ):
+        if values and len(values) != n_values:
+            raise ValueError(f"--{name} needs {n_values} values, got {len(values)}")
+        if name.endswith("scale") and any(not v > 0 for v in values):
+            raise ValueError(f"--{name} must be positive, got {values}")
+    if any(i < 0 or i >= n_input for i in log_inputs):
+        raise ValueError(f"--log_inputs must be between 0 and {n_input - 1}, got {log_inputs}")
+
+    if (field_scaling == "std" or input_scaling == "minmax") and not restart:
+        # (on restart, the checkpoint has the values)
+        stats = scaling_statistics(TrainDataset, getattr(args, "scaling_samples", 1024), log_inputs, COMM)
+        if field_scaling == "std":
+            std = stats["field_std"]
+            field_offset = field_offset or stats["field_mean"].tolist()
+            field_scale = field_scale or np.where(np.isfinite(std) & (std > 0), std, 1.0).tolist()
+        if input_scaling == "minmax":
+            half_range = 0.5 * (stats["input_max"] - stats["input_min"])
+            input_offset = input_offset or (0.5 * (stats["input_max"] + stats["input_min"])).tolist()
+            input_scale = input_scale or np.where(half_range > 0, half_range, 1.0).tolist()
+
+    if use_field_scaling:
+        finalLayer: nn.Module = ScaledAlphaLinear(
+            n_channels=n_channels,
+            n_dims=n_dims,
+            offset=field_offset or None,
+            scale=field_scale or None,
+        )
+    else:
+        finalLayer = AlphaLinear(n_channels=n_channels, n_dims=n_dims)
+    firstLayer: nn.Module = nn.Identity()
+    if use_input_scaling:
+        firstLayer = InputScaling(
+            offset=input_offset or [0.0] * n_input,
+            scale=input_scale or [1.0] * n_input,
+            log_inputs=log_inputs,
+        )
 
     # options added after the first integration tests; getattr keeps older argument namespaces working
     use_batch_norm = not getattr(args, "no_batch_norm", False)
@@ -434,7 +493,7 @@ def main(args: argparse.Namespace) -> None:
         intermediate_channels=args.intermediate_channels,
         max_features=args.max_feature,
         min_features=args.min_feature,
-        first_layer=nn.Identity(),
+        first_layer=firstLayer,
         last_layer=finalLayer,
         x_kernel=args.x_kernel,
         y_kernel=args.y_kernel,
@@ -466,6 +525,19 @@ def main(args: argparse.Namespace) -> None:
         model.load_state_dict(torch.load(restart_model, map_location=map_location)["model"])
 
     print("Checkpoint and model have been loaded!")
+
+    # the scaling values in use, from the checkpoint on restart
+    if use_field_scaling:
+        field_offset = cast(torch.Tensor, finalLayer.offset).flatten().tolist()
+        field_scale = cast(torch.Tensor, finalLayer.scale).flatten().tolist()
+        if rank == 0:
+            print(f"Field scaling: offset {field_offset} scale {field_scale}")
+    if use_input_scaling:
+        input_offset = cast(torch.Tensor, firstLayer.offset).flatten().tolist()
+        input_scale = cast(torch.Tensor, firstLayer.scale).flatten().tolist()
+        log_inputs = cast(torch.Tensor, firstLayer.log_mask).flatten().nonzero().flatten().tolist()
+        if rank == 0:
+            print(f"Input scaling: log of inputs {log_inputs}, offset {input_offset} scale {input_scale}")
 
     if args.compile:
         model = torch.compile(model)
@@ -537,9 +609,18 @@ def main(args: argparse.Namespace) -> None:
         print(f"[Rank{rank}] loaded previous optimizer state")
 
     if args.vis_config and rank == 0:
-        # TODO: Estimate these values from the training data
         model_name = "Professor Model"
-        model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_input)]
+        if use_input_scaling:
+            # the raw inputs that the input scaling maps to [-1, 1]
+            model_params = []
+            for ii in range(n_input):
+                bounds = [input_offset[ii] - input_scale[ii], input_offset[ii] + input_scale[ii]]
+                if ii in log_inputs:
+                    bounds = [float(np.exp(b)) for b in bounds]
+                model_params.append((f"parameter_{ii}", min(bounds), max(bounds)))
+        else:
+            # TODO: Estimate these values from the training data
+            model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_input)]
 
         build_template_config(
             config_fname=args.vis_config,
@@ -565,6 +646,11 @@ def main(args: argparse.Namespace) -> None:
             use_batch_norm=use_batch_norm,
             res_blocks=res_blocks,
             coord_channels=coord_channels,
+            field_offset=field_offset if use_field_scaling else None,
+            field_scale=field_scale if use_field_scaling else None,
+            input_offset=input_offset if use_input_scaling else None,
+            input_scale=input_scale if use_input_scaling else None,
+            log_inputs=log_inputs if use_input_scaling else None,
         )
 
     # try to free up gpu memory
@@ -576,6 +662,8 @@ def main(args: argparse.Namespace) -> None:
         MyLoss = MAE
     else:
         MyLoss = MSE
+    # with field scaling, the training loss is on the scaled fields; the logged errors stay in dataset units
+    loss_scale = cast(torch.Tensor, finalLayer.scale) if use_field_scaling else None
 
     n_train_loader = len(train_loader)
     n_train_data = size * batch_size * n_train_loader * n_channels * n_pixels_y * n_pixels_x  # noqa E:501
@@ -635,7 +723,10 @@ def main(args: argparse.Namespace) -> None:
                         with sync_context:
                             with torch.autocast("cuda", dtype=_amp_dtype, enabled=_amp_dtype is not None):
                                 output = model(data)
-                                loss = MyLoss(output, target)
+                                if loss_scale is not None:
+                                    loss = MyLoss(output / loss_scale, target / loss_scale)
+                                else:
+                                    loss = MyLoss(output, target)
                             scaled_loss = loss / accumulation_group_size
                             scaled_loss.backward()
 
