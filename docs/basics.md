@@ -164,7 +164,8 @@ This DDP training is a weak scaling process. If you have 10x more data, then you
 `prof-trainer` is the distributed ML training command line executable.
 
 ```bash
-usage: prof-trainer [-h] [--batch_size BATCH_SIZE] [--lr LR] [--num_epochs NUM_EPOCHS] [--seed SEED] [--n_checkpoint N_CHECKPOINT]
+usage: prof-trainer [-h] [--batch_size BATCH_SIZE] [--lr LR] [--lr_scaling {linear,none}] [--lr_schedule {constant,cosine}]
+                    [--warmup_steps WARMUP_STEPS] [--lr_min LR_MIN] [--clip_grad CLIP_GRAD] [--num_epochs NUM_EPOCHS] [--seed SEED] [--n_checkpoint N_CHECKPOINT]
                     [--loss_target LOSS_TARGET] [--max_feature MAX_FEATURE] [--min_feature MIN_FEATURE] [--restart_model RESTART_MODEL] [--keys KEYS]
                     [--dataset_path DATASET_PATH] [--dataset_type DATASET_TYPE] [--dataset_file DATASET_FILE] [--y_kernel Y_KERNEL]
                     [--x_kernel X_KERNEL] [--dataloader_workers DATALOADER_WORKERS] [--divide_input_scale DIVIDE_INPUT_SCALE] [--n_sims N_SIMS]
@@ -175,6 +176,11 @@ Here is a description of each command line argument
 
 -   `batch_size` Mini-batch size controls how many image arrays to be used at a time on each GPU. You generally want the largest value that can fit into memory to optimally load all GPUs on the node. However, as this value gets larger you are likely to see out of memory errors. Normally you can get an idea of an appropriate batch size interactively on a single node.
 -   `lr` The learning rate used by the optimizer. This controls how much the optimize moves the model weights at each step. Note that this learning rate is only used on 1 GPU jobs, as an effective learning rate is applied based on the total number of GPUs and batch size to help with scaling training faster in time.
+-   `lr_scaling` (optional) 'linear' multiplies `lr` by the batch multiplier, the number of GPUs and the batch size, as described above. 'none' uses `lr` as given, e.g. to keep the learning rate of a tuned recipe when the number of GPUs changes. Default is 'linear'.
+-   `lr_schedule` (optional) The learning rate over the optimizer steps of the run, after the warm-up. 'constant' keeps it at `lr`; 'cosine' decays it along half a cosine to `lr_min` times `lr` at the last step of the last epoch. Default is 'constant'.
+-   `warmup_steps` (optional) The number of optimizer steps over which the learning rate rises linearly from `lr / warmup_steps` to `lr` at the start of the run. Works with both schedules. Default is 0, no warm-up.
+-   `lr_min` (optional) The final learning rate of the cosine schedule, as a fraction of `lr`. Default is 0.01.
+-   `clip_grad` (optional) Clip the global norm of the gradients to this value before each optimizer step. Default is 0, no clipping. The Rivus Rayleigh-Taylor study trained with `--lr 3e-4 --lr_scaling none --lr_schedule cosine --warmup_steps 500 --lr_min 0.01 --clip_grad 1`. The schedule is saved in the checkpoints, so a restart continues it; the number of steps of the schedule follows `num_epochs`, so changing it on restart stretches the rest of the schedule.
 -   `num_epochs` The total number of training epochs. One epoch is one iteration through the entire dataset.
 -   `seed` The pseudorandom seed. This does not do much right now as two exact training script will return different ML Models because this does not control the random weight initialization in the ML model.
 -   `n_checkpoint` The frequency of epochs to checkpoint the model weights to disk.

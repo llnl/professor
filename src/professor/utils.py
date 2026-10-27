@@ -2,6 +2,7 @@
 # contributors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import math
 import os
 import re
 import torch
@@ -105,3 +106,26 @@ def last_checkpoint(run_directory: str) -> Tuple[str, int]:
         return "", -1
     epoch, name = max(found)
     return os.path.join(run_directory, name), epoch
+
+
+def lr_schedule_factor(
+    step: int,
+    total_steps: int,
+    schedule: str = "constant",
+    warmup_steps: int = 0,
+    lr_min: float = 0.01,
+) -> float:
+    """
+    Learning rate of optimizer step `step` (counted from 0) as a fraction of the base learning rate.
+
+    A linear warm-up over the first warmup_steps steps, then either the full learning rate
+    ("constant") or a cosine decay to lr_min times the full learning rate at total_steps ("cosine").
+    """
+    if step < warmup_steps:
+        return (step + 1) / warmup_steps
+    if schedule == "constant":
+        return 1.0
+    if schedule == "cosine":
+        progress = min(1.0, (step - warmup_steps) / max(1, total_steps - warmup_steps))
+        return lr_min + (1.0 - lr_min) * 0.5 * (1.0 + math.cos(math.pi * progress))
+    raise ValueError(f"Unrecognized learning rate schedule: {schedule}")
