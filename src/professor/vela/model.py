@@ -73,12 +73,12 @@ class ModelCollection:
 class Model(ABC):
     MAX_CHECKPOINTS: int = 8
     CHECKPOINT_STR: str = "checkpoint_"
-    models: List[ModelCollection] = []  # empty list to store models
 
     @abstractmethod
     def __init__(self, config: Config) -> None:
         logger.info(f"Number of GPU's on {socket.gethostname()} is {self.num_gpus}")
         self._config: Config = config
+        self.models: List[ModelCollection] = []
 
     @property
     @abstractmethod
