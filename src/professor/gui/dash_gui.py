@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import sys
 import tarfile
 import tempfile
 import threading
@@ -1373,6 +1374,12 @@ def main() -> None:
         prog="prof-dash-gui",
         description="Professor dash visualization",
     )
+    app_type_choices = ("local", "server")
+    app_type_default = "local"
+    if sys.platform == "darwin":
+        app_type_choices = ("server",)
+        app_type_default = "server"
+
     parser.add_argument("config", nargs="?", type=str, help="Model configuration file")
     parser.add_argument(
         "-p",
@@ -1383,9 +1390,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--app-type",
-        default="local",
+        default=app_type_default,
         type=str,
-        choices=("local", "server"),
+        choices=app_type_choices,
         help="Application type",
     )
     parser.add_argument(
