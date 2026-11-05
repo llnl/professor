@@ -4,6 +4,34 @@ PyInstaller bundles native Python extensions, so build once on each target opera
 system rather than attempting to cross-compile. The same specification supports Linux,
 macOS, and Windows and creates an onedir distribution under `dist/`.
 
+
+## (Optional) Pre-fetch style resources
+
+The prof-dash-gui application requires access to style resources that may not be available locally.
+To pre-fetch these for offline systems, do this before building with PyInstaller:
+
+```console
+python src/professor/_pyinstaller/fetch_bootstrap_styles.py
+```
+
+The helper downloads the pinned Bootstrap 5.3.8 release ZIP into
+`.build-assets/`, verifies its SHA-256, and places `bootstrap.min.css` in
+`src/professor/gui/assets/`. If the build machine has no internet access, pass
+a previously downloaded archive instead:
+
+```console
+python src/professor/_pyinstaller/fetch_bootstrap_styles.py \
+   --archive /path/to/bootstrap-5.3.8-dist.zip
+```
+
+Run this before PyInstaller so the packaged Electron app includes the staged
+CSS. This only stages Bootstrap CSS; the Dash app still requests its Bootstrap
+and Font Awesome stylesheets from external URLs, so this step alone does not
+make the app fully network-independent.
+
+
+## Build application
+
 Install Professor with its Dash dependencies and PyInstaller into the project virtual
 environment, then run from the repository root:
 
