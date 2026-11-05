@@ -1,0 +1,49 @@
+{
+  "name": "professor-dash-gui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron wrapper for the Professor Dash GUI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "gov.llnl.professor.dash-gui",
+    "productName": "Professor Dash GUI",
+    "files": [
+      "main.js",
+      "README.md",
+      "splash.html",
+      "professor_logo.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/prof-dash-gui",
+        "to": "prof-dash-gui"
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dir"
+      ]
+    },
+    "win": {
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}
