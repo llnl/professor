@@ -60,6 +60,7 @@ dev = [
     "flake8",
     "Flake8-pyproject",
     "mkdocs",
+    "pyinstaller",
 ]
 
 [project.scripts]
