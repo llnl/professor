@@ -7,9 +7,9 @@ import io
 import os
 import tempfile
 import unittest
-import argparse
 import torch
 from professor import mltrainer
+from professor.__main__ import build_parser
 from tests.mltrainer_integration_paths import dataset_path
 
 
@@ -18,39 +18,71 @@ class TestEverything(unittest.TestCase):
     def test_prof_train_rt_data_field_loss(self):
         """train on the RT data with the pixel-difference and pyramid loss terms switched on"""
         with tempfile.TemporaryDirectory() as run_directory:
-            args = argparse.Namespace(
-                batch_size=10,
-                lr=1e-4,
-                num_epochs=2,
-                seed=1231,
-                n_checkpoint=1,
-                loss_target='l1',
-                grad_weight=1.0,
-                pyr_weight=1.0,
-                pyr_levels=5,
-                max_feature=32,
-                min_feature=4,
-                restart_model="",
-                keys="density,velocity_x,velocity_y,pressure,energy,materials",
-                dataset_path=dataset_path('rayleigh-taylor-single'),
-                dataset_type=0,
-                dataset_file='filelist.txt',
-                y_kernel=3,
-                x_kernel=1,
-                z_kernel=1,
-                upscale_type="transpose",
-                residual=False,
-                intermediate_channels=3,
-                generator_type="legacy",
-                act_fun="ReLU",
-                dataloader_workers=6,
-                divide_input_scale="1,1,1,1",
-                n_sims=100,
-                run_directory=run_directory,
+            parser = build_parser()
+            parser.set_defaults(
                 profile=False,
                 profile_memory=False,
                 compile=False,
-                vis_config="",
+            )
+            args = parser.parse_args(
+                [
+                    "--batch_size",
+                    "10",
+                    "--lr",
+                    "1e-4",
+                    "--num_epochs",
+                    "2",
+                    "--seed",
+                    "1231",
+                    "--n_checkpoint",
+                    "1",
+                    "--loss_target",
+                    "l1",
+                    "--grad_weight",
+                    "1.0",
+                    "--pyr_weight",
+                    "1.0",
+                    "--pyr_levels",
+                    "5",
+                    "--max_feature",
+                    "32",
+                    "--min_feature",
+                    "4",
+                    "--restart_model",
+                    "",
+                    "--keys",
+                    "density,velocity_x,velocity_y,pressure,energy,materials",
+                    "--dataset_path",
+                    dataset_path('rayleigh-taylor-single'),
+                    "--dataset_type",
+                    "0",
+                    "--dataset_file",
+                    "filelist.txt",
+                    "--y_kernel",
+                    "3",
+                    "--x_kernel",
+                    "1",
+                    "--z_kernel",
+                    "1",
+                    "--upscale-type",
+                    "transpose",
+                    "--intermediate-channels",
+                    "3",
+                    "--generator-type",
+                    "legacy",
+                    "--act-fun",
+                    "ReLU",
+                    "--dataloader_workers",
+                    "6",
+                    "--divide_input_scale",
+                    "1,1,1,1",
+                    "--n_sims",
+                    "100",
+                    "--run_directory",
+                    run_directory,
+                    "--vis-config",
+                    "",
+                ]
             )
             log = io.StringIO()
             with contextlib.redirect_stdout(log):

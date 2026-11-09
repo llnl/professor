@@ -669,7 +669,7 @@ def main(args: argparse.Namespace) -> None:
     def MyLoss(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return field_loss(output, target, loss_target, grad_weight, pyr_weight, pyr_levels)
 
-    def ForwardLoss(
+    def output_and_losses(
         data: torch.Tensor, target: torch.Tensor, sensitivities: torch.Tensor | None = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """model output, total loss and the Sobolev term (0 if off) for one training batch;
@@ -750,7 +750,7 @@ def main(args: argparse.Namespace) -> None:
 
                         with sync_context:
                             with torch.autocast("cuda", dtype=_amp_dtype, enabled=_amp_dtype is not None):
-                                output, loss, loss_sobolev = ForwardLoss(data, target, *sensitivities)
+                                output, loss, loss_sobolev = output_and_losses(data, target, *sensitivities)
                             if use_sobolev:
                                 train_sobolev_gpu += loss_sobolev
                             scaled_loss = loss / accumulation_group_size

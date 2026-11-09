@@ -9,10 +9,10 @@ import os
 import re
 import tempfile
 import unittest
-import argparse
 import h5py
 import numpy as np
 from professor import mltrainer
+from professor.__main__ import build_parser
 
 
 def write_dataset(path: str, n_files: int = 4, n_samples: int = 16) -> None:
@@ -50,41 +50,75 @@ class TestEverything(unittest.TestCase):
         """train with the Sobolev term on a synthetic dataset with exact sensitivities"""
         with tempfile.TemporaryDirectory() as dataset, tempfile.TemporaryDirectory() as run_directory:
             write_dataset(dataset)
-            args = argparse.Namespace(
-                batch_size=8,
-                lr=1e-4,
-                num_epochs=3,
-                seed=1231,
-                n_checkpoint=1,
-                loss_target='l1',
-                grad_weight=0.0,
-                pyr_weight=0.0,
-                pyr_levels=5,
-                sobolev_weight=1.0,
-                sobolev_key="jacobian",
-                max_feature=32,
-                min_feature=4,
-                restart_model="",
-                keys="f0,f1,f2",
-                dataset_path=dataset,
-                dataset_type=1,
-                dataset_file='filelist.txt',
-                y_kernel=3,
-                x_kernel=1,
-                z_kernel=1,
-                upscale_type="transpose",
-                residual=False,
-                intermediate_channels=3,
-                generator_type="legacy",
-                act_fun="SiLU",
-                dataloader_workers=2,
-                divide_input_scale="1,1,1,1",
-                n_sims=1000,
-                run_directory=run_directory,
+            parser = build_parser()
+            parser.set_defaults(
                 profile=False,
                 profile_memory=False,
                 compile=False,
-                vis_config="",
+            )
+            args = parser.parse_args(
+                [
+                    "--batch_size",
+                    "8",
+                    "--lr",
+                    "1e-4",
+                    "--num_epochs",
+                    "3",
+                    "--seed",
+                    "1231",
+                    "--n_checkpoint",
+                    "1",
+                    "--loss_target",
+                    "l1",
+                    "--grad_weight",
+                    "0.0",
+                    "--pyr_weight",
+                    "0.0",
+                    "--pyr_levels",
+                    "5",
+                    "--sobolev_weight",
+                    "1.0",
+                    "--sobolev_key",
+                    "jacobian",
+                    "--max_feature",
+                    "32",
+                    "--min_feature",
+                    "4",
+                    "--restart_model",
+                    "",
+                    "--keys",
+                    "f0,f1,f2",
+                    "--dataset_path",
+                    dataset,
+                    "--dataset_type",
+                    "1",
+                    "--dataset_file",
+                    "filelist.txt",
+                    "--y_kernel",
+                    "3",
+                    "--x_kernel",
+                    "1",
+                    "--z_kernel",
+                    "1",
+                    "--upscale-type",
+                    "transpose",
+                    "--intermediate-channels",
+                    "3",
+                    "--generator-type",
+                    "legacy",
+                    "--act-fun",
+                    "SiLU",
+                    "--dataloader_workers",
+                    "2",
+                    "--divide_input_scale",
+                    "1,1,1,1",
+                    "--n_sims",
+                    "1000",
+                    "--run_directory",
+                    run_directory,
+                    "--vis-config",
+                    "",
+                ]
             )
             log = io.StringIO()
             with contextlib.redirect_stdout(log):
