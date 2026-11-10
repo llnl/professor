@@ -5,52 +5,85 @@
 import os
 import tempfile
 import unittest
-import argparse
 import h5py
 import numpy as np
 import torch
 from omegaconf import OmegaConf
 from professor import mltrainer
+from professor.__main__ import build_parser
 from professor.vela.config import FullSchema, Keys
 from professor.vela.utils import get_object_reference, initialize_function_calls_in_parameters
 from tests.mltrainer_integration_paths import dataset_path
 
 
 def rt_args(run_directory, vis_config, restart_model=""):
-    return argparse.Namespace(
-        batch_size=10,
-        lr=1e-4,
-        num_epochs=2,
-        seed=1231,
-        n_checkpoint=1,
-        loss_target='l1',
-        max_feature=32,
-        min_feature=4,
-        restart_model=restart_model,
-        keys="density,velocity_x,velocity_y,pressure,energy,materials",
-        dataset_path=dataset_path('rayleigh-taylor-single'),
-        dataset_type=0,
-        dataset_file='filelist.txt',
-        y_kernel=3,
-        x_kernel=1,
-        z_kernel=1,
-        upscale_type="transpose",
-        residual=False,
-        intermediate_channels=3,
-        generator_type="legacy",
-        act_fun="ReLU",
-        dataloader_workers=6,
-        divide_input_scale="1,1,1,1",
-        n_sims=100,
-        run_directory=run_directory,
+    parser = build_parser()
+    parser.set_defaults(
         profile=False,
         profile_memory=False,
         compile=False,
-        vis_config=vis_config,
-        field_scaling="std",
-        input_scaling="minmax",
-        log_inputs="0,1,2",
-        scaling_samples=50,
+    )
+    return parser.parse_args(
+        [
+            "--batch_size",
+            "10",
+            "--lr",
+            "1e-4",
+            "--num_epochs",
+            "2",
+            "--seed",
+            "1231",
+            "--n_checkpoint",
+            "1",
+            "--loss_target",
+            "l1",
+            "--max_feature",
+            "32",
+            "--min_feature",
+            "4",
+            "--restart_model",
+            restart_model,
+            "--keys",
+            "density,velocity_x,velocity_y,pressure,energy,materials",
+            "--dataset_path",
+            dataset_path('rayleigh-taylor-single'),
+            "--dataset_type",
+            "0",
+            "--dataset_file",
+            "filelist.txt",
+            "--y_kernel",
+            "3",
+            "--x_kernel",
+            "1",
+            "--z_kernel",
+            "1",
+            "--upscale-type",
+            "transpose",
+            "--intermediate-channels",
+            "3",
+            "--generator-type",
+            "legacy",
+            "--act-fun",
+            "ReLU",
+            "--dataloader_workers",
+            "6",
+            "--divide_input_scale",
+            "1,1,1,1",
+            "--n_sims",
+            "100",
+            "--run_directory",
+            run_directory,
+            "--vis-config",
+            vis_config,
+            "--field_scaling",
+            "std",
+            "--input_scaling",
+            "minmax",
+            "--log_inputs",
+            "0,1,2",
+            "--scaling_samples",
+            "50",
+        ]
     )
 
 
