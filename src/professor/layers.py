@@ -6,7 +6,7 @@ import copy
 
 import torch
 from torch import nn
-from typing import Optional, Any, cast
+from typing import Optional, Any, Sequence, cast
 
 
 class AlphaLinear(nn.Module):
@@ -25,6 +25,72 @@ class AlphaLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.alpha * x + self.beta
+
+
+class ScaledAlphaLinear(AlphaLinear):
+    """
+    AlphaLinear followed by a fixed per-channel affine map, (alpha * x + beta) * scale + offset.
+
+    The network before this layer works on fields of order 1, while the model output keeps
+    the physical units of the dataset. offset and scale are saved with the model as buffers.
+    """
+
+    def __init__(
+        self,
+        n_channels: int = 1,
+        n_dims: int = 2,
+        offset: Optional[Sequence[float]] = None,
+        scale: Optional[Sequence[float]] = None,
+    ) -> None:
+        super(ScaledAlphaLinear, self).__init__(n_channels=n_channels, n_dims=n_dims)
+        tensor_size = [1, n_channels] + [1 for _ in range(n_dims)]
+        offset = [0.0] * n_channels if offset is None else [float(v) for v in offset]
+        scale = [1.0] * n_channels if scale is None else [float(v) for v in scale]
+        if len(offset) != n_channels or len(scale) != n_channels:
+            raise ValueError(f"offset and scale need {n_channels} values, got {len(offset)} and {len(scale)}")
+        self.register_buffer("offset", torch.tensor(offset).view(*tensor_size))
+        self.register_buffer("scale", torch.tensor(scale).view(*tensor_size))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return (self.alpha * x + self.beta) * self.scale + self.offset
+
+
+class InputScaling(nn.Module):
+    """
+    Fixed per-input map to order 1: x_i -> (f_i(x_i) - offset_i) / scale_i, where f_i is log
+    for the inputs listed in log_inputs and the identity otherwise.
+
+    It is the first layer of a model that takes the raw inputs of the dataset, of shape
+    (batch, n_inputs, 1, ...). offset, scale and the log mask are saved with the model as buffers.
+    """
+
+    def __init__(
+        self,
+        offset: Sequence[float],
+        scale: Sequence[float],
+        log_inputs: Optional[Sequence[int]] = None,
+    ) -> None:
+        super(InputScaling, self).__init__()
+        offset = [float(v) for v in offset]
+        scale = [float(v) for v in scale]
+        if len(offset) != len(scale):
+            raise ValueError(f"offset and scale need the same length, got {len(offset)} and {len(scale)}")
+        log_mask = [False] * len(offset)
+        for i in [] if log_inputs is None else log_inputs:
+            log_mask[int(i)] = True
+        self.register_buffer("offset", torch.tensor(offset).view(1, -1, 1))
+        self.register_buffer("scale", torch.tensor(scale).view(1, -1, 1))
+        self.register_buffer("log_mask", torch.tensor(log_mask).view(1, -1, 1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shape = x.shape
+        x = x.reshape(shape[0], shape[1], -1)
+        log_mask = cast(torch.Tensor, self.log_mask)
+        # log only where flagged; the where() keeps the gradient finite for the other inputs
+        log_x = torch.log(torch.where(log_mask, x, torch.ones_like(x)))
+        x = torch.where(log_mask, log_x, x)
+        x = (x - cast(torch.Tensor, self.offset)) / cast(torch.Tensor, self.scale)
+        return x.reshape(shape)
 
 
 class ModTanh(nn.Module):
