@@ -625,12 +625,21 @@ def main(args: argparse.Namespace) -> None:
         field_scale = cast(torch.Tensor, finalLayer.scale).flatten().tolist()
         if rank == 0:
             print(f"Field scaling: offset {field_offset} scale {field_scale}")
+            if writer is not None:
+                rows = "".join(f"| {k} | {o:.6g} | {s:.6g} |\n" for k, o, s in zip(keys, field_offset, field_scale))
+                writer.add_text("Scaling/fields", "| field | offset | scale |\n|---|---|---|\n" + rows)
     if use_input_scaling:
         input_offset = cast(torch.Tensor, firstLayer.offset).flatten().tolist()
         input_scale = cast(torch.Tensor, firstLayer.scale).flatten().tolist()
         log_inputs = cast(torch.Tensor, firstLayer.log_mask).flatten().nonzero().flatten().tolist()
         if rank == 0:
             print(f"Input scaling: log of inputs {log_inputs}, offset {input_offset} scale {input_scale}")
+            if writer is not None:
+                rows = "".join(
+                    f"| {i} | {'yes' if i in log_inputs else 'no'} | {o:.6g} | {s:.6g} |\n"
+                    for i, (o, s) in enumerate(zip(input_offset, input_scale))
+                )
+                writer.add_text("Scaling/inputs", "| input | log | offset | scale |\n|---|---|---|---|\n" + rows)
 
     if args.compile:
         model = torch.compile(model)
