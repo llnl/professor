@@ -73,7 +73,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--loss_target",
         default="l1",
         type=str,
-        help="Either 'l1' for mean absolute error, or 'l2' for mean squared error. Default is l1",
+        help="Pointwise term of the loss: 'l1' for mean absolute error, or 'l2' for mean squared error."
+        " Default is l1",
+    )
+    parser.add_argument(
+        "--grad_weight",
+        default=0.0,
+        type=float,
+        help="Weight of the loss term on differences of the error between neighbouring pixels. Default 0: off.",
+    )
+    parser.add_argument(
+        "--pyr_weight",
+        default=0.0,
+        type=float,
+        help="Weight of the loss term on the Laplacian pyramid of the error. Default 0: off.",
+    )
+    parser.add_argument(
+        "--pyr_levels",
+        default=5,
+        type=int,
+        help="Number of band-pass levels of the Laplacian pyramid loss term.",
+    )
+    parser.add_argument(
+        "--sobolev_weight",
+        default=0.0,
+        type=float,
+        help="Weight of the loss term matching the model's derivatives with respect to its inputs to"
+        " sensitivities stored in the dataset (key --sobolev_key). Default 0: off.",
+    )
+    parser.add_argument(
+        "--sobolev_key",
+        default="jacobian",
+        type=str,
+        help="hdf5 key of the field sensitivities d fields / d inputs, one per sample of shape"
+        " (k, channels, y, x) for the first k inputs. Only read if --sobolev_weight > 0.",
     )
     parser.add_argument(
         "--max_feature",
