@@ -660,9 +660,17 @@ def build_template_config(
     coord_channels: bool = True,
     fields: list[str] = ["field"],
     input_parameters: list[tuple[str, float, float]] = [("parameter_0", -1.0, 1.0)],
+    field_offset: Union[list[float], None] = None,
+    field_scale: Union[list[float], None] = None,
+    input_offset: Union[list[float], None] = None,
+    input_scale: Union[list[float], None] = None,
+    log_inputs: Union[list[int], None] = None,
 ) -> None:
     """
     Build a template visualization config file
+
+    field_offset and field_scale select the professor.layers.ScaledAlphaLinear last layer,
+    input_offset, input_scale and log_inputs the professor.layers.InputScaling first layer.
     """
     conf: dict[str, Any] = OmegaConf.load(template_config_path)  # type: ignore
     conf["model"]["pytorch"]["name"] = model_name
@@ -713,6 +721,24 @@ def build_template_config(
 
     if generator_type == "3D-spectral":
         # Note: some layers in this model type do not support half precision
+        conf["model"]["pytorch"]["execution"]["half_precision"] = False
+
+    if field_offset is not None or field_scale is not None:
+        last_layer = params["last_layer"]["invocation"]
+        last_layer["target"] = "professor.layers.ScaledAlphaLinear"
+        last_layer["params"]["offset"] = [float(v) for v in field_offset or [0.0] * n_channels]
+        last_layer["params"]["scale"] = [float(v) for v in field_scale or [1.0] * n_channels]
+
+    if input_offset is not None or input_scale is not None or log_inputs is not None:
+        params["first_layer"]["invocation"] = {
+            "target": "professor.layers.InputScaling",
+            "params": {
+                "offset": [float(v) for v in input_offset or [0.0] * n_inputs],
+                "scale": [float(v) for v in input_scale or [1.0] * n_inputs],
+                "log_inputs": [int(v) for v in log_inputs or []],
+            },
+        }
+        # Note: the model takes the raw inputs, whose offsets lose digits in half precision
         conf["model"]["pytorch"]["execution"]["half_precision"] = False
 
     # Set fields and sliders
