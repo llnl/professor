@@ -319,18 +319,80 @@ def lr_schedule_factor(
     schedule: str = "constant",
     warmup_steps: int = 0,
     lr_min: float = 0.01,
+    decay_start: Optional[int] = None,
+    decay_from: float = 1.0,
 ) -> float:
     """
     Learning rate of optimizer step `step` (counted from 0) as a fraction of the base learning rate.
 
     A linear warm-up over the first warmup_steps steps, then either the full learning rate
-    ("constant") or a cosine decay to lr_min times the full learning rate at total_steps ("cosine").
+    ("constant") or a cosine decay ("cosine") from decay_from at step decay_start (warmup_steps by
+    default) to lr_min at step total_steps - 1, the last optimizer step of the run. A restart that
+    changes total_steps passes the restart step and its learning rate as decay_start and decay_from,
+    so the learning rate decays on from where it was instead of jumping.
     """
     if step < warmup_steps:
         return (step + 1) / warmup_steps
     if schedule == "constant":
         return 1.0
     if schedule == "cosine":
-        progress = min(1.0, (step - warmup_steps) / max(1, total_steps - warmup_steps))
-        return lr_min + (1.0 - lr_min) * 0.5 * (1.0 + math.cos(math.pi * progress))
+        start = warmup_steps if decay_start is None else decay_start
+        progress = min(1.0, max(0, step - start) / max(1, total_steps - 1 - start))
+        return lr_min + (decay_from - lr_min) * 0.5 * (1.0 + math.cos(math.pi * progress))
     raise ValueError(f"Unrecognized learning rate schedule: {schedule}")
+
+
+LR_SCHEDULE_DEFAULTS = {"lr_schedule": "constant", "warmup_steps": 0, "lr_min": 0.01}
+
+
+def lr_schedule_settings(
+    given: Dict[str, Any],
+    total_steps: int,
+    saved: Optional[Dict[str, Any]] = None,
+    restart_step: int = 0,
+) -> Dict[str, Any]:
+    """
+    Settings of the learning rate schedule of a run, as saved in its checkpoints.
+
+    `given` holds the lr_schedule, warmup_steps and lr_min given on the command line, None where not
+    given. A restart passes the settings `saved` in its checkpoint and the optimizer step it restarts
+    from: the saved settings fill in those not given, and a given setting that differs is an error.
+    If the restarted run has a different number of steps, the cosine decays on from the learning rate
+    of the restart step to lr_min at the new last step, instead of jumping.
+    """
+    settings = {}
+    for key, default in LR_SCHEDULE_DEFAULTS.items():
+        value = given.get(key)
+        if saved is not None:
+            if value is None:
+                value = saved[key]
+            elif value != saved[key]:
+                raise ValueError(
+                    f"--{key} {value} differs from {saved[key]} in the restart checkpoint;"
+                    " a restart continues the schedule of the checkpoint"
+                )
+        settings[key] = default if value is None else value
+    settings.update(total_steps=total_steps, decay_start=None, decay_from=1.0)
+    if saved is not None:
+        settings.update(decay_start=saved["decay_start"], decay_from=saved["decay_from"])
+        if (
+            settings["lr_schedule"] == "cosine"
+            and saved["total_steps"] != total_steps
+            and restart_step > settings["warmup_steps"]
+        ):
+            settings["decay_from"] = lr_schedule_from_settings(restart_step, saved)
+            settings["decay_start"] = restart_step
+    return settings
+
+
+def lr_schedule_from_settings(step: int, settings: Dict[str, Any]) -> float:
+    """lr_schedule_factor of step `step` for the settings of lr_schedule_settings"""
+    return lr_schedule_factor(
+        step,
+        settings["total_steps"],
+        settings["lr_schedule"],
+        settings["warmup_steps"],
+        settings["lr_min"],
+        settings["decay_start"],
+        settings["decay_from"],
+    )

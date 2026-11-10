@@ -65,22 +65,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--lr_schedule",
-        default="constant",
+        default=None,
         choices=("constant", "cosine"),
         help="Learning rate schedule over the optimizer steps of the run, after the warm-up:"
-        " 'constant', or 'cosine' decay to lr_min * lr at the last step. Default is 'constant'.",
+        " 'constant', or 'cosine' decay to lr_min * lr at the last step. Default is 'constant',"
+        " or the schedule of the restart checkpoint.",
     )
     parser.add_argument(
         "--warmup_steps",
-        default=0,
+        default=None,
         type=int,
-        help="Number of optimizer steps of linear learning rate warm-up from 0. Default is 0.",
+        help="Number of optimizer steps of linear learning rate warm-up from 0. Default is 0,"
+        " or the warm-up of the restart checkpoint.",
     )
     parser.add_argument(
         "--lr_min",
-        default=0.01,
+        default=None,
         type=float,
-        help="Final learning rate of the cosine schedule, as a fraction of the learning rate. Default is 0.01.",
+        help="Final learning rate of the cosine schedule, as a fraction of the learning rate. Default is 0.01,"
+        " or the lr_min of the restart checkpoint.",
     )
     parser.add_argument(
         "--clip_grad",
