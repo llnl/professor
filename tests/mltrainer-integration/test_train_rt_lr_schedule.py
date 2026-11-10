@@ -59,8 +59,8 @@ class TestEverything(unittest.TestCase):
         with tempfile.TemporaryDirectory() as run_directory:
             mltrainer.main(rt_args(run_directory))
 
-            first = torch.load(f"{run_directory}/0000", map_location="cpu")
-            last = torch.load(f"{run_directory}/0001", map_location="cpu")
+            first = torch.load(f"{run_directory}/0000.pt", map_location="cpu")
+            last = torch.load(f"{run_directory}/0001.pt", map_location="cpu")
             self.assertEqual(first["scheduler"]["last_epoch"], steps_per_epoch)
             self.assertEqual(last["scheduler"]["last_epoch"], 2 * steps_per_epoch)
             # the learning rate is not scaled, and has decayed to lr_min * lr at the end of the run
@@ -70,8 +70,8 @@ class TestEverything(unittest.TestCase):
             # a restart continues the schedule where the checkpoint left it
             restart_directory = f"{run_directory}/restart"
             os.mkdir(restart_directory)
-            mltrainer.main(rt_args(restart_directory, restart_model=f"{run_directory}/0000"))
-            restarted = torch.load(f"{restart_directory}/0000", map_location="cpu")
+            mltrainer.main(rt_args(restart_directory, restart_model=f"{run_directory}/0000.pt"))
+            restarted = torch.load(f"{restart_directory}/0000.pt", map_location="cpu")
             self.assertEqual(restarted["scheduler"]["last_epoch"], 2 * steps_per_epoch)
             self.assertAlmostEqual(
                 restarted["optimizer"]["param_groups"][0]["lr"], last["optimizer"]["param_groups"][0]["lr"]
