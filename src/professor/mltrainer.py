@@ -19,6 +19,7 @@ from professor.utils import (
     field_loss,
     forward_jacobian_vector_product,
     last_checkpoint,
+    lr_schedule_factor,
     scaling_statistics,
     sobolev_loss,
 )
@@ -338,7 +339,11 @@ def main(args: argparse.Namespace) -> None:
 
     # learning rate scaling
     # batch_multiplier * ngpu * bs * base_lr
-    lr = batch_multiplier * size * batch_size * lr
+    lr_scaling = getattr(args, "lr_scaling", "linear")
+    if lr_scaling == "linear":
+        lr = batch_multiplier * size * batch_size * lr
+    elif lr_scaling != "none":
+        raise ValueError(f"Unrecognized learning rate scaling: {lr_scaling}")
     if rank == 0:
         print("New effective lr=", lr)
 
@@ -703,12 +708,38 @@ def main(args: argparse.Namespace) -> None:
     #         lr=lr,
     #     )
 
+    # Learning rate schedule, stepped after each optimizer step
+    lr_schedule = getattr(args, "lr_schedule", "constant")
+    warmup_steps = getattr(args, "warmup_steps", 0)
+    lr_min = getattr(args, "lr_min", 0.01)
+    clip_grad = getattr(args, "clip_grad", 0.0)
+    steps_per_epoch = -(-len(train_loader) // batch_multiplier)
+    total_steps = num_epochs * steps_per_epoch
+
+    def lr_lambda(step: int) -> float:
+        return lr_schedule_factor(step, total_steps, lr_schedule, warmup_steps, lr_min)
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     if restart:
         # load optimizer state
-        optimizer.load_state_dict(torch.load(restart_model)["optimizer"])
+        checkpoint = torch.load(restart_model)
+        optimizer.load_state_dict(checkpoint["optimizer"])
         # if optimizer_complex is not None:
         #     optimizer_complex.load_state_dict(torch.load(restart_model)["optimizer_complex"])
+        if "scheduler" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler"])
+        else:
+            # a checkpoint without a schedule: start the schedule at the restart epoch
+            scheduler.last_epoch = epoch_number * steps_per_epoch
+        for group, base_lr in zip(optimizer.param_groups, scheduler.base_lrs):
+            group["lr"] = base_lr * lr_lambda(scheduler.last_epoch)
         print(f"[Rank{rank}] loaded previous optimizer state")
+    if rank == 0 and (lr_schedule != "constant" or warmup_steps > 0):
+        print(
+            f"Learning rate schedule: {lr_schedule}, {warmup_steps} warm-up steps, minimum {lr_min} * lr,"
+            f" {total_steps} steps, starting at step {scheduler.last_epoch}"
+        )
 
     if args.vis_config and rank == 0:
         model_name = "Professor Model"
@@ -858,7 +889,10 @@ def main(args: argparse.Namespace) -> None:
                             scaled_loss.backward()
 
                         if should_update_weights:
+                            if clip_grad > 0:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                             optimizer.step()
+                            scheduler.step()
                             # if optimizer_complex is not None:
                             #     optimizer_complex.step()
 
@@ -919,6 +953,7 @@ def main(args: argparse.Namespace) -> None:
                             "L-infinity/train": training_maxs[0],
                             "L-infinity/test": training_maxs[1],
                             "Epoch-Time": t1 - t0,
+                            "Learning-Rate": scheduler.get_last_lr()[0],
                         }
                         for model_idx in range(n_models):
                             history[f"TrainMAE/{keys[model_idx]}"] = training_sums[7 + model_idx] / n_train_data  # noqa E:501
@@ -952,7 +987,7 @@ def main(args: argparse.Namespace) -> None:
 
                     if rank == 0:
                         filepath = f"{output_dir}/{epoch:04d}.pt"
-                        state = {"optimizer": optimizer.state_dict()}
+                        state = {"optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict()}
                         # if optimizer_complex is not None:
                         #     state["optimizer_complex"] = optimizer_complex.state_dict()
 
