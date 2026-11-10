@@ -62,7 +62,7 @@ class TestEverything(unittest.TestCase):
             vis_config = f"{run_directory}/vis_config.yaml"
             mltrainer.main(rt_args(run_directory, vis_config))
 
-            checkpoint = f"{run_directory}/0001"
+            checkpoint = f"{run_directory}/0001.pt"
             state = torch.load(checkpoint, map_location="cpu")["model"]
             field_scale = state["last_layer.scale"].flatten()
             input_offset = state["first_layer.offset"].flatten()
@@ -104,7 +104,7 @@ class TestEverything(unittest.TestCase):
             restart_directory = f"{run_directory}/restart"
             os.mkdir(restart_directory)
             mltrainer.main(rt_args(restart_directory, "", restart_model=checkpoint))
-            restarted = torch.load(f"{restart_directory}/0001", map_location="cpu")["model"]
+            restarted = torch.load(f"{restart_directory}/0001.pt", map_location="cpu")["model"]
             for key in ["last_layer.offset", "last_layer.scale", "first_layer.offset", "first_layer.scale"]:
                 self.assertTrue(torch.equal(restarted[key], state[key]))
 
