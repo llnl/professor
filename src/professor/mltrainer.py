@@ -19,6 +19,8 @@ from professor.utils import (
     field_loss,
     forward_jacobian_vector_product,
     last_checkpoint,
+    LRScheduleSettings,
+    lr_schedule_settings,
     scaling_statistics,
     sobolev_loss,
 )
@@ -323,7 +325,7 @@ def main(args: argparse.Namespace) -> None:
         print(f"[perf] cudnn.benchmark={_prof_bench} channels_last={_prof_chlast} amp={_prof_amp or 'off'}")
 
     batch_size = args.batch_size
-    batch_multiplier = getattr(args, "batch_multiplier", 1)
+    batch_multiplier = args.batch_multiplier
     if batch_multiplier < 1:
         raise ValueError("batch_multiplier must be a positive integer.")
     lr = args.lr
@@ -338,7 +340,8 @@ def main(args: argparse.Namespace) -> None:
 
     # learning rate scaling
     # batch_multiplier * ngpu * bs * base_lr
-    lr = batch_multiplier * size * batch_size * lr
+    if args.lr_scaling:
+        lr = batch_multiplier * size * batch_size * lr
     if rank == 0:
         print("New effective lr=", lr)
 
@@ -407,11 +410,11 @@ def main(args: argparse.Namespace) -> None:
     scaling = torch.tensor(scales).float().view(-1, 1, 1)
 
     # the derivative (Sobolev) loss term needs the training samples' sensitivities
-    sobolev_weight = getattr(args, "sobolev_weight", 0.0)
+    sobolev_weight = args.sobolev_weight
     use_sobolev = sobolev_weight > 0
     if use_sobolev and (args.dataset_type == 3 or args.compile):
         raise ValueError("--sobolev_weight > 0 needs dataset type 0, 1 or 2 and no --compile")
-    sensitivity_key = getattr(args, "sobolev_key", "jacobian") if use_sobolev else ""
+    sensitivity_key = args.sobolev_key if use_sobolev else ""
 
     if args.dataset_type == 0:
         TrainDataset = CompleteDataset(
@@ -516,13 +519,13 @@ def main(args: argparse.Namespace) -> None:
 
     # Optional scaling of the fields and inputs to order 1 inside the model. The model still
     # maps raw inputs to fields in the units of the dataset, so prof-vis needs no extra steps.
-    field_scaling = getattr(args, "field_scaling", "none")
-    field_offset = _float_list(getattr(args, "field_offset", ""))
-    field_scale = _float_list(getattr(args, "field_scale", ""))
-    input_scaling = getattr(args, "input_scaling", "none")
-    input_offset = _float_list(getattr(args, "input_offset", ""))
-    input_scale = _float_list(getattr(args, "input_scale", ""))
-    log_inputs = [int(v) for v in _float_list(getattr(args, "log_inputs", ""))]
+    field_scaling = args.field_scaling
+    field_offset = _float_list(args.field_offset)
+    field_scale = _float_list(args.field_scale)
+    input_scaling = args.input_scaling
+    input_offset = _float_list(args.input_offset)
+    input_scale = _float_list(args.input_scale)
+    log_inputs = [int(v) for v in _float_list(args.log_inputs)]
     use_field_scaling = field_scaling != "none" or len(field_offset) > 0 or len(field_scale) > 0
     use_input_scaling = input_scaling != "none" or len(input_offset) > 0 or len(input_scale) > 0 or len(log_inputs) > 0
     if field_scaling not in ("none", "std"):
@@ -544,7 +547,7 @@ def main(args: argparse.Namespace) -> None:
 
     if (field_scaling == "std" or input_scaling == "minmax") and not restart:
         # (on restart, the checkpoint has the values)
-        stats = scaling_statistics(TrainDataset, getattr(args, "scaling_samples", 1024), log_inputs, COMM)
+        stats = scaling_statistics(TrainDataset, args.scaling_samples, log_inputs, COMM)
         if field_scaling == "std":
             std = stats["field_std"]
             field_offset = field_offset or stats["field_mean"].tolist()
@@ -572,9 +575,9 @@ def main(args: argparse.Namespace) -> None:
         )
 
     # options added after the first integration tests; getattr keeps older argument namespaces working
-    use_batch_norm = not getattr(args, "no_batch_norm", False)
-    res_blocks = [int(b) for b in str(getattr(args, "res_blocks", "1")).split(",")]
-    coord_channels = not getattr(args, "no_coord_channels", False)
+    use_batch_norm = not args.no_batch_norm
+    res_blocks = [int(b) for b in str(args.res_blocks).split(",")]
+    coord_channels = not args.no_coord_channels
 
     # Select generator strategy
     # Note: last_bias is not wired into the user argument parser
@@ -703,12 +706,51 @@ def main(args: argparse.Namespace) -> None:
     #         lr=lr,
     #     )
 
+    # Learning rate schedule, stepped after each optimizer step. The checkpoints save its settings,
+    # which a restart continues.
+    clip_grad = args.clip_grad
+    steps_per_epoch = -(-len(train_loader) // batch_multiplier)
+    total_steps = num_epochs * steps_per_epoch
+    checkpoint = torch.load(restart_model) if restart else {}
+    saved_schedule = checkpoint.get("lr_schedule")
+    schedule_settings = lr_schedule_settings(
+        total_steps,
+        lr_schedule=args.lr_schedule,
+        warmup_steps=args.warmup_steps,
+        lr_min=args.lr_min,
+        saved=LRScheduleSettings.from_checkpoint(saved_schedule) if saved_schedule else None,
+        restart_step=(
+            checkpoint["scheduler"]["last_epoch"] if "scheduler" in checkpoint else epoch_number * steps_per_epoch
+        ),
+    )
+    lr_schedule = schedule_settings.lr_schedule
+    warmup_steps = schedule_settings.warmup_steps
+    lr_min = schedule_settings.lr_min
+
+    def lr_lambda(step: int) -> float:
+        return schedule_settings.factor(step)
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     if restart:
         # load optimizer state
-        optimizer.load_state_dict(torch.load(restart_model)["optimizer"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
         # if optimizer_complex is not None:
         #     optimizer_complex.load_state_dict(torch.load(restart_model)["optimizer_complex"])
+        if "scheduler" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler"])
+        else:
+            # a checkpoint without a schedule: start the schedule at the restart epoch
+            scheduler.last_epoch = epoch_number * steps_per_epoch
+        for group, base_lr in zip(optimizer.param_groups, scheduler.base_lrs):
+            group["lr"] = base_lr * lr_lambda(scheduler.last_epoch)
         print(f"[Rank{rank}] loaded previous optimizer state")
+    step_lr = optimizer.param_groups[0]["lr"]
+    if rank == 0 and (lr_schedule != "constant" or warmup_steps > 0):
+        print(
+            f"Learning rate schedule: {lr_schedule}, {warmup_steps} warm-up steps, minimum {lr_min} * lr,"
+            f" {total_steps} steps, starting at step {scheduler.last_epoch}"
+        )
 
     if args.vis_config and rank == 0:
         model_name = "Professor Model"
@@ -758,9 +800,9 @@ def main(args: argparse.Namespace) -> None:
     # try to free up gpu memory
     torch.cuda.empty_cache()
 
-    grad_weight = getattr(args, "grad_weight", 0.0)
-    pyr_weight = getattr(args, "pyr_weight", 0.0)
-    pyr_levels = getattr(args, "pyr_levels", 5)
+    grad_weight = args.grad_weight
+    pyr_weight = args.pyr_weight
+    pyr_levels = args.pyr_levels
 
     # with field scaling, the training loss is on the scaled fields; the logged errors stay in dataset units
     loss_scale = cast(torch.Tensor, finalLayer.scale) if use_field_scaling else None
@@ -858,7 +900,12 @@ def main(args: argparse.Namespace) -> None:
                             scaled_loss.backward()
 
                         if should_update_weights:
+                            if clip_grad > 0:
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                             optimizer.step()
+                            # the learning rate of this step, logged at the end of the epoch
+                            step_lr = optimizer.param_groups[0]["lr"]
+                            scheduler.step()
                             # if optimizer_complex is not None:
                             #     optimizer_complex.step()
 
@@ -919,6 +966,7 @@ def main(args: argparse.Namespace) -> None:
                             "L-infinity/train": training_maxs[0],
                             "L-infinity/test": training_maxs[1],
                             "Epoch-Time": t1 - t0,
+                            "Learning-Rate": step_lr,
                         }
                         for model_idx in range(n_models):
                             history[f"TrainMAE/{keys[model_idx]}"] = training_sums[7 + model_idx] / n_train_data  # noqa E:501
@@ -952,7 +1000,11 @@ def main(args: argparse.Namespace) -> None:
 
                     if rank == 0:
                         filepath = f"{output_dir}/{epoch:04d}.pt"
-                        state = {"optimizer": optimizer.state_dict()}
+                        state = {
+                            "optimizer": optimizer.state_dict(),
+                            "scheduler": scheduler.state_dict(),
+                            "lr_schedule": schedule_settings.to_checkpoint(),
+                        }
                         # if optimizer_complex is not None:
                         #     state["optimizer_complex"] = optimizer_complex.state_dict()
 

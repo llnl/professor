@@ -56,6 +56,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Learning rate used by the optimizer. Note effective learning"
         " rate is applied based on the total number of GPUs and batch size.",
     )
+    parser.add_argument(
+        "--lr_scaling",
+        dest="lr_scaling",
+        action="store_true",
+        help="Multiply --lr by batch_multiplier * number of GPUs * batch_size. This is the default.",
+    )
+    parser.add_argument(
+        "--no_lr_scaling",
+        dest="lr_scaling",
+        action="store_false",
+        help="Use --lr as the learning rate, without scaling it.",
+    )
+    parser.set_defaults(lr_scaling=True)
+    parser.add_argument(
+        "--lr_schedule",
+        default=None,
+        choices=("constant", "cosine"),
+        help="Learning rate schedule over the optimizer steps of the run, after the warm-up:"
+        " 'constant', or 'cosine' decay to lr_min * lr at the last step. Default is 'constant',"
+        " or the schedule of the restart checkpoint.",
+    )
+    parser.add_argument(
+        "--warmup_steps",
+        default=None,
+        type=int,
+        help="Number of optimizer steps of linear learning rate warm-up from 0. Default is 0,"
+        " or the warm-up of the restart checkpoint.",
+    )
+    parser.add_argument(
+        "--lr_min",
+        default=None,
+        type=float,
+        help="Final learning rate of the cosine schedule, as a fraction of the learning rate. Default is 0.01,"
+        " or the lr_min of the restart checkpoint.",
+    )
+    parser.add_argument(
+        "--clip_grad",
+        default=0.0,
+        type=float,
+        help="Clip the global gradient norm to this value before each optimizer step. Default is 0, no clipping.",
+    )
     parser.add_argument("--num_epochs", default=100, type=int, help="The total number of training epochs.")
     parser.add_argument(
         "--seed",

@@ -5,10 +5,10 @@
 import os
 import tempfile
 import unittest
-import argparse
 import torch
 from omegaconf import OmegaConf
 from professor import mltrainer
+from professor.__main__ import build_parser
 from professor.vela.config import FullSchema, Keys
 from professor.vela.utils import get_object_reference, initialize_function_calls_in_parameters
 from tests.mltrainer_integration_paths import dataset_path
@@ -20,7 +20,8 @@ class TestEverything(unittest.TestCase):
         """train the 2D-resize-resnet generator on the RT data, then rebuild it from the vis config"""
         with tempfile.TemporaryDirectory() as run_directory:
             vis_config = f"{run_directory}/vis_config.yaml"
-            args = argparse.Namespace(
+            parser = build_parser()
+            parser.set_defaults(
                 batch_size=10,
                 lr=1e-4,
                 num_epochs=2,
@@ -54,6 +55,7 @@ class TestEverything(unittest.TestCase):
                 compile=False,
                 vis_config=vis_config,
             )
+            args = parser.parse_args([])
             mltrainer.main(args)
 
             checkpoint = f"{run_directory}/0001.pt"
