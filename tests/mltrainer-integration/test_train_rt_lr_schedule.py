@@ -72,8 +72,7 @@ def rt_args(run_directory, restart_model="", num_epochs=2, schedule=True):
             run_directory,
             "--vis-config",
             "",
-            "--lr_scaling",
-            "none",
+            "--no_lr_scaling",
             "--clip_grad",
             "1.0",
         ]

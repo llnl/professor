@@ -2,12 +2,13 @@
 # contributors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import io
 import math
 
 import pytest
 import torch
 
-from professor.utils import lr_schedule_factor, lr_schedule_from_settings, lr_schedule_settings
+from professor.utils import LRScheduleSettings, lr_schedule_factor, lr_schedule_settings
 
 
 def test_constant_schedule_is_one_without_warmup():
@@ -59,56 +60,79 @@ def test_cosine_decay_from_a_restart_step():
 
 
 def test_settings_defaults_and_given():
-    settings = lr_schedule_settings({"lr_schedule": None, "warmup_steps": None, "lr_min": None}, 50)
-    assert settings == {
-        "lr_schedule": "constant",
-        "warmup_steps": 0,
-        "lr_min": 0.01,
-        "total_steps": 50,
-        "decay_start": None,
-        "decay_from": 1.0,
-    }
-    settings = lr_schedule_settings({"lr_schedule": "cosine", "warmup_steps": 5, "lr_min": None}, 50)
-    assert (settings["lr_schedule"], settings["warmup_steps"], settings["lr_min"]) == ("cosine", 5, 0.01)
+    settings = lr_schedule_settings(50)
+    assert settings == LRScheduleSettings(
+        total_steps=50, lr_schedule="constant", warmup_steps=0, lr_min=0.01, decay_start=None, decay_from=1.0
+    )
+    settings = lr_schedule_settings(50, lr_schedule="cosine", warmup_steps=5)
+    assert (settings.lr_schedule, settings.warmup_steps, settings.lr_min) == ("cosine", 5, 0.01)
+
+
+@pytest.mark.parametrize(
+    "bad, message",
+    [
+        ({"lr_schedule": "step"}, "Unrecognized learning rate schedule"),
+        ({"total_steps": 0}, "total_steps must be at least 1"),
+        ({"warmup_steps": -1}, "warmup_steps must not be negative"),
+        ({"lr_min": 1.5}, "lr_min is a fraction of lr"),
+        ({"decay_start": -1}, "decay_start must not be negative"),
+        ({"decay_from": 0.0}, "decay_from must be in"),
+    ],
+)
+def test_settings_are_validated(bad, message):
+    with pytest.raises(ValueError, match=message):
+        LRScheduleSettings(**{"total_steps": 50, **bad})
+
+
+def test_settings_round_trip_through_a_checkpoint():
+    """the checkpoints save the settings as a plain dict, which torch.load reads with weights_only"""
+    settings = lr_schedule_settings(100, lr_schedule="cosine", warmup_steps=5, lr_min=0.1)
+    restarted = lr_schedule_settings(200, saved=settings, restart_step=40)
+    buffer = io.BytesIO()
+    torch.save({"lr_schedule": restarted.to_checkpoint()}, buffer)
+    buffer.seek(0)
+    saved = torch.load(buffer, weights_only=True)["lr_schedule"]
+    assert isinstance(saved, dict)
+    assert LRScheduleSettings.from_checkpoint(saved) == restarted
 
 
 def test_restart_uses_the_saved_settings():
     """a restart without the schedule arguments continues the saved schedule"""
-    saved = lr_schedule_settings({"lr_schedule": "cosine", "warmup_steps": 5, "lr_min": 0.1}, 100)
-    restarted = lr_schedule_settings({}, 100, saved, restart_step=40)
+    saved = lr_schedule_settings(100, lr_schedule="cosine", warmup_steps=5, lr_min=0.1)
+    restarted = lr_schedule_settings(100, saved=saved, restart_step=40)
     assert restarted == saved
-    restarted = lr_schedule_settings({"lr_schedule": "cosine", "lr_min": 0.1}, 100, saved, restart_step=40)
+    restarted = lr_schedule_settings(100, lr_schedule="cosine", lr_min=0.1, saved=saved, restart_step=40)
     assert restarted == saved
 
 
 def test_restart_rejects_different_settings():
-    saved = lr_schedule_settings({"lr_schedule": "cosine", "warmup_steps": 5, "lr_min": 0.1}, 100)
+    saved = lr_schedule_settings(100, lr_schedule="cosine", warmup_steps=5, lr_min=0.1)
     with pytest.raises(ValueError, match="--lr_min 0.2 differs from 0.1"):
-        lr_schedule_settings({"lr_min": 0.2}, 100, saved, restart_step=40)
+        lr_schedule_settings(100, lr_min=0.2, saved=saved, restart_step=40)
     with pytest.raises(ValueError, match="--lr_schedule constant differs from cosine"):
-        lr_schedule_settings({"lr_schedule": "constant"}, 100, saved, restart_step=40)
+        lr_schedule_settings(100, lr_schedule="constant", saved=saved, restart_step=40)
 
 
 @pytest.mark.parametrize("new_total", [60, 100, 200])
 def test_restart_with_a_different_number_of_steps_does_not_jump(new_total):
     """the learning rate at the restart step stays, and decays to lr_min at the new last step"""
-    saved = lr_schedule_settings({"lr_schedule": "cosine", "warmup_steps": 5, "lr_min": 0.1}, 100)
-    restarted = lr_schedule_settings({}, new_total, saved, restart_step=40)
-    before = lr_schedule_from_settings(40, saved)
-    assert lr_schedule_from_settings(40, restarted) == pytest.approx(before)
-    assert lr_schedule_from_settings(new_total - 1, restarted) == pytest.approx(0.1)
-    factors = [lr_schedule_from_settings(step, restarted) for step in range(40, new_total)]
+    saved = lr_schedule_settings(100, lr_schedule="cosine", warmup_steps=5, lr_min=0.1)
+    restarted = lr_schedule_settings(new_total, saved=saved, restart_step=40)
+    before = saved.factor(40)
+    assert restarted.factor(40) == pytest.approx(before)
+    assert restarted.factor(new_total - 1) == pytest.approx(0.1)
+    factors = [restarted.factor(step) for step in range(40, new_total)]
     assert all(a >= b for a, b in zip(factors, factors[1:]))
     # and a second restart with the same number of steps keeps the decay of the first
-    again = lr_schedule_settings({}, new_total, restarted, restart_step=50)
+    again = lr_schedule_settings(new_total, saved=restarted, restart_step=50)
     assert again == restarted
 
 
 def test_restart_in_the_warmup_with_a_different_number_of_steps():
     """the warm-up does not depend on the number of steps, so a restart in it keeps the plain schedule"""
-    saved = lr_schedule_settings({"lr_schedule": "cosine", "warmup_steps": 50, "lr_min": 0.1}, 100)
-    restarted = lr_schedule_settings({}, 200, saved, restart_step=20)
-    assert restarted == lr_schedule_settings({"lr_schedule": "cosine", "warmup_steps": 50, "lr_min": 0.1}, 200)
+    saved = lr_schedule_settings(100, lr_schedule="cosine", warmup_steps=50, lr_min=0.1)
+    restarted = lr_schedule_settings(200, saved=saved, restart_step=20)
+    assert restarted == lr_schedule_settings(200, lr_schedule="cosine", warmup_steps=50, lr_min=0.1)
 
 
 def test_unknown_schedule():

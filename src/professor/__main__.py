@@ -58,11 +58,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--lr_scaling",
-        default="linear",
-        choices=("linear", "none"),
-        help="'linear' multiplies --lr by batch_multiplier * number of GPUs * batch_size;"
-        " 'none' uses --lr as the learning rate. Default is 'linear'.",
+        dest="lr_scaling",
+        action="store_true",
+        help="Multiply --lr by batch_multiplier * number of GPUs * batch_size. This is the default.",
     )
+    parser.add_argument(
+        "--no_lr_scaling",
+        dest="lr_scaling",
+        action="store_false",
+        help="Use --lr as the learning rate, without scaling it.",
+    )
+    parser.set_defaults(lr_scaling=True)
     parser.add_argument(
         "--lr_schedule",
         default=None,
