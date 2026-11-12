@@ -43,6 +43,7 @@ class Keys(Enum):
     PARAMS = "params"
     EXECUTION = "execution"
     HALF_PRECISION = "half_precision"
+    PARAMETRIC_SLICES = "parametric_slices"
     JIT = "jit"
 
     GUI = "gui"
@@ -244,6 +245,7 @@ class ExecutionSchema(VelaSchema):
             # fmt: off
             {
                 Optional(Keys.HALF_PRECISION.value, default=True): bool,
+                Optional(Keys.PARAMETRIC_SLICES.value, default=0): int,
                 Optional(Keys.JIT.value, default=True): bool,
             }
             # fmt: on
@@ -493,7 +495,7 @@ class Config:
         self.invocation_params: Dict[str, Any] = self.invocation[Keys.PARAMS.value]
         logger.debug(f"Invocation {Keys.PARAMS.value}: {self.invocation_params}")
 
-        self.execution: Dict[str, bool] = self.model[Keys.EXECUTION.value]
+        self.execution: Dict[str, Any] = self.model[Keys.EXECUTION.value]
         logger.debug(f"{Keys.EXECUTION.value}: {self.execution}")
 
         self.half_precision: bool = self.execution[Keys.HALF_PRECISION.value]
@@ -501,6 +503,9 @@ class Config:
 
         self.jit: bool = self.execution[Keys.JIT.value]
         logger.debug(f"{Keys.JIT.value}: {self.jit}")
+
+        self.parametric_slices: int = self.execution[Keys.PARAMETRIC_SLICES.value]
+        logger.debug(f"{Keys.PARAMETRIC_SLICES.value}: {self.parametric_slices}")
 
         self.gui_type: str = self.get_top_level_key_name(gui=True)
         self.gui: Dict[str, Any] = self.full[Keys.GUI.value][self.gui_type]
@@ -646,6 +651,7 @@ def build_template_config(
     x_pixels: int = 512,
     y_pixels: int = 512,
     z_pixels: int = 1,
+    parametric_slices: int = 0,
     min_features: int = 128,
     max_features: int = 1024,
     x_kernel: int = 4,
@@ -692,6 +698,8 @@ def build_template_config(
     conf["model"]["pytorch"]["invocation"]["target"] = available_generators[generator_type]
 
     params = conf["model"]["pytorch"]["invocation"]["params"]
+    model_input_count = n_inputs + int(parametric_slices > 1)
+    params["input_size"] = model_input_count
     params["num_channels"] = n_channels
     params["im_size"] = max(y_pixels, x_pixels, z_pixels)  # as in prof-trainer; the template uses x_pixels
     params["min_features"] = min_features
@@ -723,6 +731,9 @@ def build_template_config(
         # Note: some layers in this model type do not support half precision
         conf["model"]["pytorch"]["execution"]["half_precision"] = False
 
+    if parametric_slices > 1:
+        conf["model"]["pytorch"]["execution"]["parametric_slices"] = parametric_slices
+
     if field_offset is not None or field_scale is not None:
         last_layer = params["last_layer"]["invocation"]
         last_layer["target"] = "professor.layers.ScaledAlphaLinear"
@@ -733,8 +744,8 @@ def build_template_config(
         params["first_layer"]["invocation"] = {
             "target": "professor.layers.InputScaling",
             "params": {
-                "offset": [float(v) for v in input_offset or [0.0] * n_inputs],
-                "scale": [float(v) for v in input_scale or [1.0] * n_inputs],
+                "offset": [float(v) for v in input_offset or [0.0] * model_input_count],
+                "scale": [float(v) for v in input_scale or [1.0] * model_input_count],
                 "log_inputs": [int(v) for v in log_inputs or []],
             },
         }

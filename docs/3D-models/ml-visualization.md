@@ -35,6 +35,12 @@ gui:
       source_2_z: {lower_bound: 0.0, upper_bound: 1.0, initial_value: 0.5}
 ```
 
+For a model trained with the parametric 2D approach, the sliders represent
+only the physical/input parameters. The z coordinate is an internal input to
+the wrapper; it is evaluated across all trained z slices and is not added as a
+user-facing slider. The returned prediction still has the full 3D shape and
+can be viewed with the orthogonal-slice or volume rendering controls.
+
 
 ## Start the web GUI
 

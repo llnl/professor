@@ -36,7 +36,40 @@ from torchinfo import summary
 from typing import cast, Tuple, Any
 
 
-class CompleteDataset(Dataset[Any]):
+class ParametricSlicingMixin:
+    def _init_parametric_slicing(self) -> None:
+        self._base_length = self._length
+        self.parametric_slices = 0
+        self._parametric_enabled = False
+
+    def enable_parametric_slicing(self) -> None:
+        if self._parametric_enabled:
+            return
+        if self.pixels_z <= 1:
+            raise ValueError("Parametric slicing requires a 3D dataset.")
+
+        self.parametric_slices = self.pixels_z
+        self._length = self._base_length * self.parametric_slices
+        self.pixels_z = 1
+        self.n_input += 1
+        self._parametric_enabled = True
+
+    def _parametric_index(self, i: int) -> tuple[int, int | None]:
+        if self._parametric_enabled:
+            return divmod(i, self.parametric_slices)
+        return i, None
+
+    def _append_parametric_coordinate(self, inputs: torch.Tensor, slice_id: int | None) -> torch.Tensor:
+        if slice_id is None:
+            return inputs
+        coordinate = inputs.new_full(
+            (1,) * inputs.ndim,
+            float(slice_id) / self.parametric_slices,
+        )
+        return torch.cat([inputs, coordinate], dim=0)
+
+
+class CompleteDataset(ParametricSlicingMixin, Dataset[Any]):
     """One sample per hdf5 file. With sensitivity_key set, items also hold the field sensitivities
     f[sensitivity_key], shape (k, *fields.shape): d fields / d inputs for the first k inputs."""
 
@@ -57,20 +90,30 @@ class CompleteDataset(Dataset[Any]):
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
         self.sensitivity_key: str = sensitivity_key
+        self._init_parametric_slicing()
         self.__getsizes__(0)
 
     def __len__(self) -> int:
         return self._length
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, ...]:
-        myfile = f"{self._path}/{self.filelist[i]}"
+        case_id, slice_id = self._parametric_index(i)
+        myfile = f"{self._path}/{self.filelist[case_id]}"
         try:
             with h5py.File(myfile, "r") as f:
                 # calling nan_to_num does seem to impact performance
                 inputs = cast(h5py.Group, f["inputs"])[:]
-                data = cast(h5py.Group, f["fields"])[:]
-                sensitivities = cast(h5py.Group, f[self.sensitivity_key])[:] if self.sensitivity_key else None
+                fields = cast(h5py.Dataset, f["fields"])
+                data = fields[:] if slice_id is None else fields[..., slice_id]
+                if self.sensitivity_key:
+                    sensitivity_data = cast(h5py.Dataset, f[self.sensitivity_key])
+                    sensitivities = (
+                        sensitivity_data[:] if slice_id is None else sensitivity_data[..., slice_id]
+                    )
+                else:
+                    sensitivities = None
             inputs = torch.from_numpy(inputs)
+            inputs = self._append_parametric_coordinate(inputs, slice_id)
             data = torch.from_numpy(data)
             if sensitivities is not None:
                 return inputs.view(-1, 1, 1), data, torch.from_numpy(sensitivities)
@@ -110,30 +153,41 @@ class CompleteDatasetDivideScaling(CompleteDataset):
         self.n_input: int = 0
         self.scaling: torch.Tensor = scaling
         self.sensitivity_key: str = sensitivity_key
+        self._init_parametric_slicing()
         self.__getsizes__(0)
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, ...]:
-        myfile = f"{self._path}/{self.filelist[i]}"
+        case_id, slice_id = self._parametric_index(i)
+        myfile = f"{self._path}/{self.filelist[case_id]}"
         try:
             with h5py.File(myfile, "r") as f:
                 # calling nan_to_num does seem to impact performance
                 inputs = cast(h5py.Group, f["inputs"])[:]
-                data = cast(h5py.Group, f["fields"])[:]
-                sensitivities = cast(h5py.Group, f[self.sensitivity_key])[:] if self.sensitivity_key else None
+                fields = cast(h5py.Dataset, f["fields"])
+                data = fields[:] if slice_id is None else fields[..., slice_id]
+                if self.sensitivity_key:
+                    sensitivity_data = cast(h5py.Dataset, f[self.sensitivity_key])
+                    sensitivities = (
+                        sensitivity_data[:] if slice_id is None else sensitivity_data[..., slice_id]
+                    )
+                else:
+                    sensitivities = None
             inputs = torch.from_numpy(inputs)
+            inputs = inputs.view(-1, 1, 1) / self.scaling
+            inputs = self._append_parametric_coordinate(inputs, slice_id)
             data = torch.from_numpy(data)
             if sensitivities is not None:
                 sensitivities = torch.from_numpy(sensitivities)
                 scale = self.scaling.flatten()[: sensitivities.shape[0]].to(sensitivities.dtype)
                 sensitivities = sensitivities * scale.view(-1, *([1] * (sensitivities.dim() - 1)))
-                return inputs.view(-1, 1, 1) / self.scaling, data, sensitivities
-            return inputs.view(-1, 1, 1) / self.scaling, data
+                return inputs, data, sensitivities
+            return inputs, data
         except Exception as e:
             error = f"Exception {e} while processing {myfile}"
             raise RuntimeError(error)
 
 
-class CompleteDatasetOneFileSims(Dataset[Any]):
+class CompleteDatasetOneFileSims(ParametricSlicingMixin, Dataset[Any]):
     """Many samples per hdf5 file, indexed by the filelist. With sensitivity_key set, items also hold
     f[sensitivity_key][idx], shape (k, *fields.shape): d fields / d inputs for the first k inputs."""
 
@@ -153,14 +207,16 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
         self.filelist: NDArray[np.str_] = filelist
         self.n_input: int = 0
         self.sensitivity_key: str = sensitivity_key
+        self._init_parametric_slicing()
         self.__getsizes__(0)
 
     def __len__(self) -> int:
         return self._length
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, ...]:
-        file = self.filelist[i][0]
-        idx = self.filelist[i][1]
+        case_id, slice_id = self._parametric_index(i)
+        file = self.filelist[case_id][0]
+        idx = self.filelist[case_id][1]
         myfile = f"{self._path}/{file}"
         try:
             with h5py.File(myfile, "r") as f:
@@ -168,9 +224,17 @@ class CompleteDatasetOneFileSims(Dataset[Any]):
                 # inputs = np.nan_to_num(f['inputs'][idx])
                 # data = np.nan_to_num(f['fields'][idx])
                 inputs = cast(h5py.Group, f["inputs"])[idx]
-                data = cast(h5py.Group, f["fields"])[idx]
-                sensitivities = cast(h5py.Group, f[self.sensitivity_key])[idx] if self.sensitivity_key else None
+                fields = cast(h5py.Dataset, f["fields"])
+                data = fields[idx] if slice_id is None else fields[idx, ..., slice_id]
+                if self.sensitivity_key:
+                    sensitivity_data = cast(h5py.Dataset, f[self.sensitivity_key])
+                    sensitivities = (
+                        sensitivity_data[idx] if slice_id is None else sensitivity_data[idx, ..., slice_id]
+                    )
+                else:
+                    sensitivities = None
             inputs = torch.from_numpy(inputs)
+            inputs = self._append_parametric_coordinate(inputs, slice_id)
             data = torch.from_numpy(data)
             if sensitivities is not None:
                 return inputs.view(-1, 1, 1), data, torch.from_numpy(sensitivities)
@@ -480,6 +544,16 @@ def main(args: argparse.Namespace) -> None:
     else:
         raise Exception(f"Unrecognized dataset type: {args.dataset_type}")
 
+    parametric_slices = 0
+    if n_pixels_z > 1 and "3D" not in args.generator_type:
+        if use_sobolev:
+            raise ValueError("Parametric slicing is not supported with the Sobolev loss.")
+        TrainDataset.enable_parametric_slicing()
+        ValDataset.enable_parametric_slicing()
+        n_input = TrainDataset.n_input
+        n_pixels_z = 1
+        parametric_slices = TrainDataset.parametric_slices
+
     print(f"[Rank{rank}] finished setting up data loaders")
     COMM.Barrier()
 
@@ -528,6 +602,11 @@ def main(args: argparse.Namespace) -> None:
     log_inputs = [int(v) for v in _float_list(args.log_inputs)]
     use_field_scaling = field_scaling != "none" or len(field_offset) > 0 or len(field_scale) > 0
     use_input_scaling = input_scaling != "none" or len(input_offset) > 0 or len(input_scale) > 0 or len(log_inputs) > 0
+    if parametric_slices > 1:
+        if input_offset and len(input_offset) == n_input - 1:
+            input_offset.append(0.0)
+        if input_scale and len(input_scale) == n_input - 1:
+            input_scale.append(1.0)
     if field_scaling not in ("none", "std"):
         raise ValueError(f"Unrecognized field scaling: {field_scaling}")
     if input_scaling not in ("none", "minmax"):
@@ -754,17 +833,21 @@ def main(args: argparse.Namespace) -> None:
 
     if args.vis_config and rank == 0:
         model_name = "Professor Model"
+        n_slider_inputs = n_input
+        if parametric_slices > 1:
+            # The final model input is the generated z coordinate, not a user parameter.
+            n_slider_inputs -= 1
         if use_input_scaling:
             # the raw inputs that the input scaling maps to [-1, 1]
             model_params = []
-            for ii in range(n_input):
+            for ii in range(n_slider_inputs):
                 bounds = [input_offset[ii] - input_scale[ii], input_offset[ii] + input_scale[ii]]
                 if ii in log_inputs:
                     bounds = [float(np.exp(b)) for b in bounds]
                 model_params.append((f"parameter_{ii}", min(bounds), max(bounds)))
         else:
             # TODO: Estimate these values from the training data
-            model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_input)]
+            model_params = [(f"parameter_{ii}", -1.0, 1.0) for ii in range(n_slider_inputs)]
 
         build_template_config(
             config_fname=args.vis_config,
@@ -772,10 +855,11 @@ def main(args: argparse.Namespace) -> None:
             checkpoint_path=f"{output_dir}/0000.pt",
             n_channels=n_channels,
             intermediate_channels=args.intermediate_channels,
-            n_inputs=n_input,
+            n_inputs=n_slider_inputs,
             x_pixels=n_pixels_x,
             y_pixels=n_pixels_y,
             z_pixels=n_pixels_z,
+            parametric_slices=parametric_slices,
             min_features=args.min_feature,
             max_features=args.max_feature,
             x_kernel=args.x_kernel,
@@ -1033,9 +1117,9 @@ def main(args: argparse.Namespace) -> None:
                         raise Exception(f"Model returned an unexpected value: {type(output)}")
 
                     if n_dims == 2:
-                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x)
+                        val_images = output.view(-1, n_channels, n_pixels_y, n_pixels_x)
                     elif n_dims == 3:
-                        val_images = output.view(1, n_channels, n_pixels_y, n_pixels_x, n_pixels_z)
+                        val_images = output.view(-1, n_channels, n_pixels_y, n_pixels_x, n_pixels_z)
                     else:
                         raise Exception(f"Invalid number of dimensions: {n_dims}")
 
