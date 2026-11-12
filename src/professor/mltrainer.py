@@ -62,8 +62,11 @@ class ParametricSlicingMixin:
     def _append_parametric_coordinate(self, inputs: torch.Tensor, slice_id: int | None) -> torch.Tensor:
         if slice_id is None:
             return inputs
-        z = torch.tensor(float(slice_id) / self.parametric_slices, dtype=inputs.dtype)
-        return torch.cat([inputs, z.view(1, 1, 1)], dim=0)
+        coordinate = inputs.new_full(
+            (1,) * inputs.ndim,
+            float(slice_id) / self.parametric_slices,
+        )
+        return torch.cat([inputs, coordinate], dim=0)
 
 
 class CompleteDataset(ParametricSlicingMixin, Dataset[Any]):

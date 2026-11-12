@@ -495,7 +495,7 @@ class Config:
         self.invocation_params: Dict[str, Any] = self.invocation[Keys.PARAMS.value]
         logger.debug(f"Invocation {Keys.PARAMS.value}: {self.invocation_params}")
 
-        self.execution: Dict[str, bool] = self.model[Keys.EXECUTION.value]
+        self.execution: Dict[str, Any] = self.model[Keys.EXECUTION.value]
         logger.debug(f"{Keys.EXECUTION.value}: {self.execution}")
 
         self.half_precision: bool = self.execution[Keys.HALF_PRECISION.value]
