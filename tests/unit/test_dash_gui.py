@@ -7,13 +7,9 @@ from typing import Any
 import numpy as np
 import pytest
 
-from professor.gui.dash_gui import (
-    ResultCache,
-    SliderConfig,
-    build_config_payload_from_text,
-    build_config_payload_from_upload,
-    build_slider,
-)
+from professor.file_io import build_config_payload_from_text, build_config_payload_from_upload
+from professor.gui.dash_gui import SliderConfig, build_slider
+from professor.gui.model_cache import ResultCache
 from professor.vela.config import Config
 from professor.vela.model import Model
 

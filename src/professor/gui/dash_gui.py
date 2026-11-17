@@ -17,11 +17,10 @@ from plotly.subplots import make_subplots  # type: ignore
 from professor.file_io import (
     RESULT_SIZE_LIMIT,
     build_config_payload_from_path,
-    build_config_payload_from_text,  # noqa: F401
     build_config_payload_from_upload,
     write_hdf5,
 )
-from professor.gui.model_cache import ResultCache, decode_array, encode_array, model_cache, result_cache  # noqa: F401
+from professor.gui.model_cache import decode_array, encode_array, model_cache, result_cache
 
 SLIDER_MARK_COUNT = 5
 SLIDER_MARK_SIG_DIGITS = 6
