@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
-# import tkinter as tk
-# from tkinter import filedialog
 import dash  # type: ignore
 import dash_bootstrap_components as dbc  # type: ignore
 import numpy as np
@@ -956,7 +954,7 @@ def build_application(initial_config: str | None = None, app_type: str = "local"
             State("active-model", "data"),
             prevent_initial_call=True,
         )
-        def load_config(
+        def load_config_server(
             upload_contents: str | None,
             n_clicks: int,
             upload_filename: str | None,
@@ -1004,7 +1002,7 @@ def build_application(initial_config: str | None = None, app_type: str = "local"
             State("active-model", "data"),
             prevent_initial_call=True,
         )
-        def load_config(
+        def load_config_local(
             n_clicks: int,
             server_config_path: str | None,
             session_id: str,
