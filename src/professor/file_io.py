@@ -106,7 +106,7 @@ def find_bundle_config(bundle_root: Path) -> Path:
 
 
 def resolve_checkpoint_paths(conf: Any, base_dir: Path | None, allow_relative: bool) -> list[str]:
-    """Resolve checkpoint paths in a config and store the resolved paths back into it."""
+    """Resolve checkpoint paths against base_dir when allowed and store them back into the config."""
     checkpoints = conf[config.Keys.MODEL.value][config.Keys.PYTORCH.value][config.Keys.CHECKPOINTS.value]
     resolved: list[str] = []
     for raw_path in checkpoints:
@@ -219,7 +219,7 @@ def build_config_payload_from_path(config_path: str, session_id: str) -> dict[st
 
 
 def build_config_payload_from_upload(contents: str, filename: str, session_id: str) -> dict[str, Any]:
-    """Build a UI payload from an uploaded YAML file or archive bundle."""
+    """Build a UI payload from YAML or an archive, resolving bundle paths beside the YAML config."""
     raw_data = decode_upload(contents)
     if is_archive(filename):
         extraction_root = Path(tempfile.mkdtemp(prefix=f"professor-dash-{session_id}-"))
@@ -232,7 +232,7 @@ def build_config_payload_from_upload(contents: str, filename: str, session_id: s
             config_path.read_text(encoding="utf-8"),
             source=str(config_path),
             session_id=session_id,
-            base_dir=extraction_root,
+            base_dir=config_path.parent,
             allow_relative=True,
         )
 
