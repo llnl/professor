@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import sys
+import multiprocessing
 import uuid
 from dataclasses import dataclass
 from functools import partial
@@ -468,7 +468,20 @@ def build_load_model_modal(initial_status: Any = None, is_open: bool = False, ap
                     dbc.Col(
                         dcc.Upload(
                             id="config-upload",
-                            children=html.Div(["Drag and drop or select a YAML config or bundle"]),
+                            children=html.Div(
+                                [
+                                    "Drag and drop or ",
+                                    html.Span(
+                                        "select",
+                                        style={
+                                            "color": "#0d6efd",
+                                            "textDecoration": "underline",
+                                            "cursor": "pointer",
+                                        },
+                                    ),
+                                    " a YAML config or bundle",
+                                ]
+                            ),
                             multiple=False,
                             className="border rounded p-4 text-center",
                         ),
@@ -617,7 +630,7 @@ def build_status(message: str, color: str = "danger") -> dbc.Alert:
     return dbc.Alert(message, color=color, dismissable=True)
 
 
-def get_file_path() -> str:
+def _select_file_path() -> str:
     """
     Request a configuration filename from the user via a pop up search window
     """
@@ -639,6 +652,52 @@ def get_file_path() -> str:
     file_path = filedialog.askopenfilename(parent=root, title="Select Target Model", filetypes=filetypes)
     root.destroy()
     return file_path
+
+
+def _get_file_path_worker(connection: Any) -> None:
+    try:
+        connection.send((True, _select_file_path()))
+    except Exception as exc:  # noqa: BLE001
+        connection.send((False, str(exc)))
+    finally:
+        connection.close()
+
+
+def get_file_path() -> str:
+    """Open the Tk file picker in a separate process and return the chosen path.
+
+    macOS requires Tkinter to run on the main thread, but Dash callbacks may run
+    on a worker thread. The separate process gives the picker its own main thread.
+    """
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=False)
+    process = context.Process(target=_get_file_path_worker, args=(child_connection,))
+
+    try:
+        process.start()
+    except BaseException:
+        parent_connection.close()
+        child_connection.close()
+        raise
+
+    child_connection.close()
+    try:
+        try:
+            result = parent_connection.recv()
+        except EOFError:
+            result = None
+    finally:
+        parent_connection.close()
+        process.join()
+        process.close()
+
+    if result is None:
+        raise RuntimeError("The file picker process exited without returning a path.")
+
+    success, value = result
+    if not success:
+        raise RuntimeError(f"Could not open the file picker: {value}")
+    return value
 
 
 def build_application(initial_config: str | None = None, app_type: str = "local") -> dash.Dash:
@@ -919,12 +978,6 @@ def main() -> None:
         prog="prof-dash-gui",
         description="Professor dash visualization",
     )
-    app_type_choices = ("local", "server")
-    app_type_default = "local"
-    if sys.platform == "darwin":
-        app_type_choices = ("server",)
-        app_type_default = "server"
-
     parser.add_argument("config", nargs="?", type=str, help="Model configuration file")
     parser.add_argument(
         "-p",
@@ -935,9 +988,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--app-type",
-        default=app_type_default,
+        default="local",
         type=str,
-        choices=app_type_choices,
+        choices=("local", "server"),
         help="Application type",
     )
     parser.add_argument(
