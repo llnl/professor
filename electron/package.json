@@ -9,8 +9,8 @@
     "package": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^44.0.0",
-    "electron-builder": "^26.0.12"
+    "electron": "44.0.0",
+    "electron-builder": "26.0.12"
   },
   "build": {
     "appId": "gov.llnl.professor.dash-gui",
