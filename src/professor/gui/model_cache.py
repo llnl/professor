@@ -1,3 +1,5 @@
+"""Caches loaded professor models and model evaluation results for the GUI."""
+
 from __future__ import annotations
 
 import base64
@@ -21,6 +23,8 @@ DEFAULT_RESULT_CACHE_ENTRIES = 8
 
 @dataclass
 class CachedModel:
+    """A loaded model and its session usage metadata."""
+
     key: str
     helper: ProfessorHelper
     ref_count: int = 0
@@ -29,6 +33,8 @@ class CachedModel:
 
 @dataclass
 class CachedResult:
+    """A model result's metadata and cached output arrays."""
+
     token: str
     instance_id: str
     fields: list[str]
@@ -43,11 +49,13 @@ class ProfessorHelper:
     """
 
     def __init__(self, prof_config: config.Config) -> None:
+        """Create a helper for the supplied professor configuration."""
         self._config = prof_config
         self._device: torch.device | str = ""
         self._model: torch.nn.Module | None = None
 
     def close(self) -> None:
+        """Release the loaded model and clear unused CUDA memory."""
         self._model = None
         self._config = None  # type: ignore[assignment]
         gc.collect()
@@ -76,7 +84,10 @@ class ProfessorHelper:
 
 
 class ModelCache:
+    """Manage loaded models with session references and bounded LRU eviction."""
+
     def __init__(self, max_entries: int = DEFAULT_CACHE_ENTRIES) -> None:
+        """Initialize the cache with a maximum number of model entries."""
         self._max_entries = max_entries
         self._entries: OrderedDict[str, CachedModel] = OrderedDict()
         self._session_keys: dict[str, str] = {}
@@ -84,6 +95,7 @@ class ModelCache:
         self._lock = threading.Lock()
 
     def release_session(self, session_id: str) -> None:
+        """Drop a session's model reference and evict unused entries if needed."""
         with self._lock:
             old_key = self._session_keys.pop(session_id, None)
             if old_key is None:
@@ -94,6 +106,11 @@ class ModelCache:
         self._evict_if_needed()
 
     def get_or_load(self, payload: dict[str, Any], session_id: str) -> ProfessorHelper:
+        """Return the cached model for a session, loading it when absent.
+
+        The payload must include ``cache_key``, ``yaml_text``, and ``source``.
+        A session is associated with at most one model cache key at a time.
+        """
         cache_key = payload["cache_key"]
         key_lock = self._get_key_lock(cache_key)
         with key_lock:
@@ -116,6 +133,7 @@ class ModelCache:
         return entry.helper
 
     def _get_entry(self, cache_key: str) -> CachedModel | None:
+        """Look up an entry and mark it as the most recently accessed."""
         with self._lock:
             entry = self._entries.get(cache_key)
             if entry is not None:
@@ -124,6 +142,7 @@ class ModelCache:
             return entry
 
     def _get_key_lock(self, cache_key: str) -> threading.Lock:
+        """Get or create the lock used to serialize loads for one cache key."""
         with self._lock:
             lock = self._locks.get(cache_key)
             if lock is None:
@@ -132,11 +151,13 @@ class ModelCache:
             return lock
 
     def _load_entry(self, payload: dict[str, Any]) -> CachedModel:
+        """Construct a cache entry from a model configuration payload."""
         prof_config = config.Config.from_text(payload["yaml_text"], source=payload["source"])
         helper = ProfessorHelper(prof_config)
         return CachedModel(key=payload["cache_key"], helper=helper, last_access=time.monotonic())
 
     def _release_previous_locked(self, previous_key: str | None) -> None:
+        """Decrement a previous model's reference count while holding the lock."""
         if previous_key is None:
             return
         previous_entry = self._entries.get(previous_key)
@@ -145,6 +166,7 @@ class ModelCache:
         previous_entry.ref_count = max(0, previous_entry.ref_count - 1)
 
     def _evict_if_needed(self) -> None:
+        """Close least-recently-used unreferenced entries until within capacity."""
         evicted: list[CachedModel] = []
         with self._lock:
             while len(self._entries) > self._max_entries:
@@ -166,13 +188,21 @@ model_cache = ModelCache()
 
 
 class ResultCache:
+    """Keep recent model outputs addressable by token and instance identifier."""
+
     def __init__(self, max_entries: int = DEFAULT_RESULT_CACHE_ENTRIES) -> None:
+        """Initialize the result cache with a maximum number of results."""
         self._max_entries = max_entries
         self._results: OrderedDict[str, CachedResult] = OrderedDict()
         self._instance_tokens: dict[str, str] = {}
         self._lock = threading.Lock()
 
     def put(self, instance_id: str, fields: list[str], output: np.ndarray) -> dict[str, Any]:
+        """Store output arrays and return their token, shape, and field names.
+
+        Each field's array is copied from the corresponding channel in the
+        batch's first item. A newer result replaces any result for the instance.
+        """
         token = str(uuid.uuid4())
         shape = list(np.shape(output)[2:])
         arrays = {}
@@ -204,6 +234,7 @@ class ResultCache:
         return {"token": token, "shape": shape, "fields": fields}
 
     def get_array(self, token: str, field: str) -> np.ndarray | None:
+        """Return a cached field array, or ``None`` if it is unavailable."""
         with self._lock:
             result = self._results.get(token)
             if result is None:
@@ -216,6 +247,7 @@ class ResultCache:
             return array
 
     def get_result(self, token: str) -> CachedResult | None:
+        """Return a cached result by token and mark it recently accessed."""
         with self._lock:
             result = self._results.get(token)
             if result is not None:
@@ -224,6 +256,7 @@ class ResultCache:
             return result
 
     def get_result_for_instance(self, instance_id: str) -> CachedResult | None:
+        """Return the latest cached result for an instance, if one exists."""
         with self._lock:
             token = self._instance_tokens.get(instance_id)
         if token is None:
@@ -231,6 +264,7 @@ class ResultCache:
         return self.get_result(token)
 
     def release_instance(self, instance_id: str) -> None:
+        """Remove the cached result associated with an instance."""
         with self._lock:
             token = self._instance_tokens.pop(instance_id, None)
             if token is not None:
@@ -243,14 +277,14 @@ result_cache = ResultCache()
 
 def encode_array(x: np.ndarray) -> str:
     """
-    Encode an NDarray as a string.
+    Encode a NumPy array of float32 values as a base64 string.
     """
     return base64.b64encode(x.astype(np.float32, copy=False).tobytes()).decode("utf-8")
 
 
 def decode_array(x_str: str, shape: list[int]) -> np.ndarray:
     """
-    Decode an NDarray from a string.
+    Decode a base64 string of float32 values into the requested shape.
     """
     img_bytes = base64.b64decode(x_str.encode("utf-8"))  # type: ignore
     flat_arr = np.frombuffer(img_bytes, dtype=np.float32)
