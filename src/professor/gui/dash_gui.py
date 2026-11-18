@@ -1,26 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import multiprocessing
 import uuid
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import dash  # type: ignore
-import dash_bootstrap_components as dbc  # type: ignore
-import numpy as np
-import plotly.graph_objs as go  # type: ignore
-from dash import ALL, MATCH, Input, Output, State, clientside_callback, dcc, html  # type: ignore
-from plotly.subplots import make_subplots  # type: ignore
+# Note: use lazy python imports to improve application startup speed
+# This is particularly important to avoid delays with the file picker
+from professor.gui.file_picker import get_file_path
 
-from professor.file_io import (
-    RESULT_SIZE_LIMIT,
-    build_config_payload_from_path,
-    build_config_payload_from_upload,
-    write_hdf5,
-)
-from professor.gui.model_cache import decode_array, encode_array, model_cache, result_cache
+if TYPE_CHECKING:
+    import dash
+    import dash_bootstrap_components as dbc
+    import numpy as np
+    import plotly.graph_objs as go
+    from dash import html
 
 SLIDER_MARK_COUNT = 5
 SLIDER_MARK_SIG_DIGITS = 6
@@ -55,6 +50,8 @@ def _format_slider_mark(value: float) -> str:
 
 
 def _build_slider_marks(slider: SliderConfig) -> dict[float, str]:
+    import numpy as np
+
     if slider.min == slider.max:
         return {slider.min: _format_slider_mark(slider.min)}
 
@@ -70,6 +67,9 @@ def build_slider(slider: SliderConfig, instance_id: str, component_type: str = "
     """
     Build a row that contains a label and slider.
     """
+    import dash_bootstrap_components as dbc
+    from dash import dcc, html
+
     tooltip = {"placement": "bottom"}
     widget = dcc.Slider(
         slider.min,
@@ -89,6 +89,9 @@ def build_dropdown(config: DropdownConfig, component_type: str, instance_id: str
     """
     Build a row that contains a label and dropdown.
     """
+    import dash_bootstrap_components as dbc
+    from dash import html
+
     widget = dbc.Select(
         id={"type": component_type, "instance_id": instance_id},
         options=config.options,
@@ -102,6 +105,9 @@ def build_entry(config: EntryConfig) -> dbc.Row:
     """
     Build a row that contains a label and entry box.
     """
+    import dash_bootstrap_components as dbc
+    from dash import html
+
     widget = dbc.Input(id=f"entry_{config.name}", type="text", placeholder="(empty)", value=config.value)
     columns = [dbc.Col(html.P(config.name)), dbc.Col(widget)]
     return dbc.Row(columns, className="border-bottom pb-3 mb-3")
@@ -111,6 +117,8 @@ def build_dummy_figure() -> go.Figure:
     """
     Build an empty placeholder figure.
     """
+    import plotly.graph_objs as go
+
     dummy_figure = go.Figure()
     axis_def = {"showline": False, "zeroline": False, "showgrid": False, "range": (0, 1)}
 
@@ -142,6 +150,8 @@ def get_color_scale(img: np.ndarray, saturation: float) -> tuple[float, float]:
     """
     Get the desired color range for an input array and saturation.
     """
+    import numpy as np
+
     cmin = np.amin(img)
     cmax = np.amax(img)
     if saturation > 1.01:
@@ -197,6 +207,8 @@ def dash_plot_2D(
     """
     Render a 2D plotly figure for a given input array.
     """
+    import plotly.graph_objs as go
+
     cmin, cmax = get_color_scale(img, saturation)
     axis_color, _marker_color, _font_color, style_kwargs = get_style_kwargs(light_mode)
 
@@ -246,6 +258,10 @@ def dash_plot_2D_planes(
     """
     Render a series of 2D plotly figures that show slices through an array.
     """
+    import numpy as np
+    import plotly.graph_objs as go
+    from plotly.subplots import make_subplots
+
     img = np.array(img)
     cmin, cmax = get_color_scale(img, saturation)
     axis_color, _marker_color, _font_color, style_kwargs = get_style_kwargs(light_mode)
@@ -332,6 +348,9 @@ def dash_plot_3D(
     """
     Render a 3D plotly figure for a given input array.
     """
+    import numpy as np
+    import plotly.graph_objs as go
+
     img = np.array(img)
     cmin, cmax = get_color_scale(img, saturation)
     axis_color, _marker_color, _font_color, style_kwargs = get_style_kwargs(light_mode)
@@ -415,6 +434,9 @@ def dash_plot_3D(
 
 
 def build_navbar() -> dbc.Navbar:
+    import dash_bootstrap_components as dbc
+    from dash import html
+
     titlebar = html.A(
         dbc.Row(
             [
@@ -459,6 +481,8 @@ def build_navbar() -> dbc.Navbar:
 
 
 def build_load_model_modal(initial_status: Any = None, is_open: bool = False, app_type: str = "local") -> dbc.Modal:
+    import dash_bootstrap_components as dbc
+    from dash import dcc, html
 
     modal_rows = []
     if app_type == "server":
@@ -552,6 +576,9 @@ def build_load_model_modal(initial_status: Any = None, is_open: bool = False, ap
 
 
 def build_model_panel(payload: dict[str, Any]) -> html.Div:
+    import dash_bootstrap_components as dbc
+    from dash import dcc, html
+
     instance_id = payload["instance_id"]
     fields = payload["fields"]
     sliders = [SliderConfig(**slider) for slider in payload["sliders"]]
@@ -627,83 +654,29 @@ def build_model_panel(payload: dict[str, Any]) -> html.Div:
 
 
 def build_status(message: str, color: str = "danger") -> dbc.Alert:
+    import dash_bootstrap_components as dbc
+
     return dbc.Alert(message, color=color, dismissable=True)
-
-
-def _select_file_path() -> str:
-    """
-    Request a configuration filename from the user via a pop up search window
-    """
-    import tkinter as tk
-    from tkinter import filedialog
-
-    # Open the tk window and push it to the top layer
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    root.focus_force()
-
-    # Ask the user for the filename
-    filetypes = [
-        ("Config (*.yml, *.yaml)", "*.yml *.yaml"),
-        ("Archive (*.zip, *.tar, *.tar.gz)", "*.zip *.tar *.tar.gz"),
-        ("All", "*"),
-    ]
-    file_path = filedialog.askopenfilename(parent=root, title="Select Target Model", filetypes=filetypes)
-    root.destroy()
-    return file_path
-
-
-def _get_file_path_worker(connection: Any) -> None:
-    try:
-        connection.send((True, _select_file_path()))
-    except Exception as exc:  # noqa: BLE001
-        connection.send((False, str(exc)))
-    finally:
-        connection.close()
-
-
-def get_file_path() -> str:
-    """Open the Tk file picker in a separate process and return the chosen path.
-
-    macOS requires Tkinter to run on the main thread, but Dash callbacks may run
-    on a worker thread. The separate process gives the picker its own main thread.
-    """
-    context = multiprocessing.get_context("spawn")
-    parent_connection, child_connection = context.Pipe(duplex=False)
-    process = context.Process(target=_get_file_path_worker, args=(child_connection,))
-
-    try:
-        process.start()
-    except BaseException:
-        parent_connection.close()
-        child_connection.close()
-        raise
-
-    child_connection.close()
-    try:
-        try:
-            result = parent_connection.recv()
-        except EOFError:
-            result = None
-    finally:
-        parent_connection.close()
-        process.join()
-        process.close()
-
-    if result is None:
-        raise RuntimeError("The file picker process exited without returning a path.")
-
-    success, value = result
-    if not success:
-        raise RuntimeError(f"Could not open the file picker: {value}")
-    return value
 
 
 def build_application(initial_config: str | None = None, app_type: str = "local") -> dash.Dash:
     """
     Build the plotly Dash application.
     """
+    import dash
+    import dash_bootstrap_components as dbc
+    import numpy as np
+    import plotly.graph_objs as go
+    from dash import ALL, MATCH, Input, Output, State, clientside_callback, dcc, html
+
+    from professor.file_io import (
+        RESULT_SIZE_LIMIT,
+        build_config_payload_from_path,
+        build_config_payload_from_upload,
+        write_hdf5,
+    )
+    from professor.gui.model_cache import decode_array, encode_array, model_cache, result_cache
+
     app = dash.Dash(
         __name__,
         external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME],
