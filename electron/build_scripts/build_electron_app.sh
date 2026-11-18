@@ -86,7 +86,13 @@ git -C "$PROFESSOR_DIR" checkout --detach FETCH_HEAD
 cd "$PROFESSOR_DIR"
 git rev-parse HEAD
 "$VENV_PYTHON" -m pip install '.[all,dash]'
+
+echo "Fetching Bootstrap stylesheet for PyInstaller"
+"$VENV_PYTHON" src/professor/_pyinstaller/fetch_bootstrap_styles.py
 "$VENV_PYTHON" -m PyInstaller --clean --noconfirm src/professor/_pyinstaller/prof-dash-gui.spec
+
+echo "Applying Tk scaling patch to PyInstaller bundle"
+"$VENV_PYTHON" src/professor/_pyinstaller/patch_tk_scaling.py dist/prof-dash-gui
 
 # Build the Electron app from the locked JavaScript dependency set.
 echo "Building Electron app"
