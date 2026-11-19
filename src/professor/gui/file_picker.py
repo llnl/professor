@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import sys
 from multiprocessing.connection import Connection
 
 
@@ -12,9 +13,13 @@ def _select_file_path() -> str:
     from tkinter import filedialog
 
     root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    root.focus_force()
+    if sys.platform == 'darwin':
+        root.geometry("1x1+500+300") 
+        root.update()
+    else:
+        root.withdraw()
+        root.attributes("-topmost", True)
+        root.focus_force()
 
     filetypes = [
         ("Config (*.yml, *.yaml)", "*.yml *.yaml"),
