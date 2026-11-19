@@ -13,8 +13,8 @@ def _select_file_path() -> str:
     from tkinter import filedialog
 
     root = tk.Tk()
-    if sys.platform == 'darwin':
-        root.geometry("1x1+500+300") 
+    if sys.platform == "darwin":
+        root.geometry("1x1+500+300")
         root.update()
     else:
         root.withdraw()
