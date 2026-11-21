@@ -2,6 +2,8 @@
 
 set -Eeuo pipefail
 trap 'status=$?; printf "Build failed with status %s at line %s: %s\n" "$status" "$LINENO" "$BASH_COMMAND" >&2' ERR
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 
 # Check build configuration
 echo "Checking build configuration"
@@ -92,7 +94,7 @@ echo "Fetching Bootstrap stylesheet for PyInstaller"
 "$VENV_PYTHON" -m PyInstaller --clean --noconfirm src/professor/_pyinstaller/prof-dash-gui.spec
 
 echo "Applying Tk scaling patch to PyInstaller bundle"
-"$VENV_PYTHON" src/professor/_pyinstaller/patch_tk_scaling.py dist/prof-dash-gui
+"$VENV_PYTHON" "$PROJECT_ROOT/src/professor/_pyinstaller/patch_tk_scaling.py" dist/prof-dash-gui
 
 # Build the Electron app from the locked JavaScript dependency set.
 echo "Building Electron app"

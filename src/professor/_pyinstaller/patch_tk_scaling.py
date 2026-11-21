@@ -26,7 +26,7 @@ def patch_bundle(root: Path) -> bool:
     if "tk scaling 1.0" in content:
         return False
 
-    match = re.search(r"(?m)^package require -exact Tk[^\n]*$", content)
+    match = re.search(r"(?im)^package\s+require\s+-exact\s+tk\b[^\r\n]*$", content)
     if match is None:
         raise RuntimeError(f"Unexpected Tk script format: {tk_script}")
 
