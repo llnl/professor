@@ -1,75 +1,24 @@
+from __future__ import annotations
+
 import argparse
-import base64
-import os
-import h5py
-import torch
-import numpy as np
+import uuid
 from dataclasses import dataclass
-import dash  # type: ignore
-import dash_bootstrap_components as dbc  # type: ignore
-from dash import Input, Output, State, dcc, html, clientside_callback  # type: ignore
-from plotly.subplots import make_subplots  # type: ignore
-import plotly.graph_objs as go  # type: ignore
-from typing import Any, Iterable
-from professor.vela import config, model
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
+# Note: use lazy python imports to improve application startup speed
+# This is particularly important to avoid delays with the file picker
+from professor.gui.file_picker import get_file_path
 
-class ProfessorHelper:
-    """
-    Helper class for launching and evaluating professor models
-    """
+if TYPE_CHECKING:
+    import dash
+    import dash_bootstrap_components as dbc
+    import numpy as np
+    import plotly.graph_objs as go
+    from dash import html
 
-    def __init__(self) -> None:
-        self._config: config.Config | None = None
-        self._device: torch.Device = ""
-        self._model: torch.nn.modules.module.Module | None = None
-
-    def load(self, config_fname: str) -> tuple[list[str], dict[str, Any]]:
-        """
-        Load a professor model from a yaml-format configuration file
-
-        Args:
-            config_name: Configuration filename
-
-        Returns:
-            List of model prediction fields, dictionary of slider inputs
-        """
-        print(f"Loading config: {config_fname}")
-        self._config = config.Config(os.path.expanduser(config_fname))
-        print("Done!")
-        return self._config.fields, self._config.sliders
-
-    def run(self, model_args: Iterable[float]) -> np.ndarray:
-        """
-        Evaluate the loaded professor model
-
-        Args:
-            model_args: list of model inputs
-
-        Returns:
-            np.ndarray of model results
-        """
-        if self._config is None:
-            print("No model is loaded")
-            return np.zeros(0)
-
-        if self._model is None:
-            print("Loading model (this may take up to a few minutes)...")
-            m = model.PyTorchModel(self._config)
-            self._device = m._get_checkpoint_device("0")
-            self._model = m.models[0].ref
-            print("Done!")
-
-        with torch.no_grad():
-            tmp = np.array(model_args)
-            x = torch.Tensor(np.reshape(tmp, (1, -1, 1, 1)))
-            if self._config.half_precision:
-                x = x.half()
-            y = self._model(x.to(self._device)).detach().to("cpu").numpy().astype(np.float32)
-            return y
-
-
-prof_model = ProfessorHelper()
+SLIDER_MARK_COUNT = 5
+SLIDER_MARK_SIG_DIGITS = 6
 
 
 @dataclass(frozen=True)
@@ -93,69 +42,83 @@ class EntryConfig:
     value: str
 
 
-def encode_array(x: np.ndarray) -> str:
-    """
-    Encode an NDarray as a string
-    """
-    return base64.b64encode(x.astype(np.float32, copy=False).tobytes()).decode("utf-8")
+def _format_slider_mark(value: float) -> str:
+    label = f"{value:.{SLIDER_MARK_SIG_DIGITS}g}"
+    if label == "-0":
+        return "0"
+    return label
 
 
-def decode_array(x_str: str, N: list[int]) -> np.ndarray:
-    """
-    Decode an NDarray from a string
-    """
-    img_bytes = base64.b64decode(x_str.encode("utf-8"))  # type: ignore
-    flat_arr = np.frombuffer(img_bytes, dtype=np.float32)
-    return flat_arr.reshape(N)
+def _build_slider_marks(slider: SliderConfig) -> dict[float, str]:
+    import numpy as np
+
+    if slider.min == slider.max:
+        return {slider.min: _format_slider_mark(slider.min)}
+
+    raw_values = np.linspace(slider.min, slider.max, SLIDER_MARK_COUNT)
+    marks = {}
+    for value in raw_values:
+        mark_value = float(f"{value:.{SLIDER_MARK_SIG_DIGITS}g}")
+        marks[mark_value] = _format_slider_mark(float(value))
+    return marks
 
 
-def build_slider(config: SliderConfig) -> dbc.Row:
+def build_slider(slider: SliderConfig, instance_id: str, component_type: str = "model-slider") -> dbc.Row:
     """
-    Build a row that contains a label and slider
+    Build a row that contains a label and slider.
     """
-    tooltip = {
-        "placement": "bottom",
-        # "always_visible": True
-    }
+    import dash_bootstrap_components as dbc
+    from dash import dcc, html
 
-    w = dcc.Slider(
-        config.min,
-        config.max,
-        value=config.default,
-        step=config.step,
+    tooltip = {"placement": "bottom"}
+    widget = dcc.Slider(
+        slider.min,
+        slider.max,
+        value=slider.default,
+        step=slider.step,
+        marks=_build_slider_marks(slider),
         vertical=False,
         tooltip=tooltip,
-        id=f"slider_{config.name}",
+        id={"type": component_type, "instance_id": instance_id, "name": slider.name},
     )
-
-    columns = [dbc.Col(html.P(config.name)), dbc.Col(w)]
+    columns = [dbc.Col(html.P(slider.name)), dbc.Col(widget)]
     return dbc.Row(columns, className="border-bottom pb-3 mb-3")
 
 
-def build_dropdown(config: DropdownConfig) -> dbc.Row:
+def build_dropdown(config: DropdownConfig, component_type: str, instance_id: str) -> dbc.Row:
     """
-    Build a row that contains a label and dropdown
+    Build a row that contains a label and dropdown.
     """
-    w = dbc.Select(id=f"dropdown_{config.name}", options=config.options, value=config.options[0])
+    import dash_bootstrap_components as dbc
+    from dash import html
 
-    columns = [dbc.Col(html.P(config.name)), dbc.Col(w)]
+    widget = dbc.Select(
+        id={"type": component_type, "instance_id": instance_id},
+        options=config.options,
+        value=config.options[0],
+    )
+    columns = [dbc.Col(html.P(config.name)), dbc.Col(widget)]
     return dbc.Row(columns, className="border-bottom pb-3 mb-3")
 
 
 def build_entry(config: EntryConfig) -> dbc.Row:
     """
-    Build a row that contains a label and entry box
+    Build a row that contains a label and entry box.
     """
-    w = dbc.Input(id=f"entry_{config.name}", type="text", placeholder="(empty)", value=config.value)
+    import dash_bootstrap_components as dbc
+    from dash import html
 
-    columns = [dbc.Col(html.P(config.name)), dbc.Col(w)]
+    widget = dbc.Input(id=f"entry_{config.name}", type="text", placeholder="(empty)", value=config.value)
+    columns = [dbc.Col(html.P(config.name)), dbc.Col(widget)]
     return dbc.Row(columns, className="border-bottom pb-3 mb-3")
 
 
 def build_dummy_figure() -> go.Figure:
     """
-    Build an empty placeholder figure
+    Build an empty placeholder figure.
     """
+    import plotly.graph_objs as go
+
     dummy_figure = go.Figure()
     axis_def = {"showline": False, "zeroline": False, "showgrid": False, "range": (0, 1)}
 
@@ -166,13 +129,13 @@ def build_dummy_figure() -> go.Figure:
         x=0.5,
         y=0.5,
         showarrow=False,
-        font=dict(size=24, color="red"),
+        font={"size": 24, "color": "red"},
         align="center",
     )
 
     dummy_figure.update_layout(
         clickmode="none",
-        margin=dict(l=20, r=20, t=50, b=50),
+        margin={"l": 20, "r": 20, "t": 50, "b": 50},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         autosize=True,
@@ -185,8 +148,10 @@ def build_dummy_figure() -> go.Figure:
 
 def get_color_scale(img: np.ndarray, saturation: float) -> tuple[float, float]:
     """
-    Get the desired color range for an input array and saturation
+    Get the desired color range for an input array and saturation.
     """
+    import numpy as np
+
     cmin = np.amin(img)
     cmax = np.amax(img)
     if saturation > 1.01:
@@ -200,10 +165,7 @@ def get_color_scale(img: np.ndarray, saturation: float) -> tuple[float, float]:
 
 def get_style_kwargs(light_mode: bool = False):
     """
-    Define common style arguments for figures
-
-    Returns:
-        dict: Dictionary of style kwargs
+    Define common style arguments for figures.
     """
     axis_color = "white"
     marker_color = "white"
@@ -218,7 +180,7 @@ def get_style_kwargs(light_mode: bool = False):
 
     style_kwargs = {
         "clickmode": "none",
-        "margin": dict(l=20, r=20, t=50, b=50),
+        "margin": {"l": 20, "r": 20, "t": 50, "b": 50},
         "autosize": True,
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": "rgba(0,0,0,0)",
@@ -243,10 +205,12 @@ def dash_plot_2D(
     img: np.ndarray, label: str = "Title", colorscale: str = "Turbo", saturation: float = 1, light_mode: bool = True
 ) -> go.Figure:
     """
-    Render a 2D plotly figure for a given input array
+    Render a 2D plotly figure for a given input array.
     """
+    import plotly.graph_objs as go
+
     cmin, cmax = get_color_scale(img, saturation)
-    axis_color, marker_color, font_color, style_kwargs = get_style_kwargs(light_mode)
+    axis_color, _marker_color, _font_color, style_kwargs = get_style_kwargs(light_mode)
 
     fig = go.Figure()
     fig.add_trace(
@@ -283,8 +247,6 @@ def dash_plot_2D(
     }
 
     fig_kwargs = {"showlegend": True}
-
-    # Update the figure
     fig.update_layout(xaxis=xaxis_def, yaxis=yaxis_def, **fig_kwargs, **style_kwargs)
 
     return fig
@@ -294,16 +256,20 @@ def dash_plot_2D_planes(
     img: np.ndarray, label: str = "Title", colorscale: str = "Turbo", saturation: float = 1, light_mode: bool = True
 ) -> go.Figure:
     """
-    Render a series of 2D plotly figures that show slices through an array
+    Render a series of 2D plotly figures that show slices through an array.
     """
+    import numpy as np
+    import plotly.graph_objs as go
+    from plotly.subplots import make_subplots
+
     img = np.array(img)
     cmin, cmax = get_color_scale(img, saturation)
-    axis_color, marker_color, font_color, style_kwargs = get_style_kwargs(light_mode)
+    axis_color, _marker_color, _font_color, style_kwargs = get_style_kwargs(light_mode)
 
-    N = np.shape(img)
-    ii = N[0] // 2
-    jj = N[1] // 2
-    kk = N[2] // 2
+    shape = np.shape(img)
+    ii = shape[0] // 2
+    jj = shape[1] // 2
+    kk = shape[2] // 2
 
     fig = make_subplots(rows=2, cols=2, subplot_titles=("Xmid", "Ymid", "Zmid", ""))
     fig.add_trace(
@@ -346,7 +312,6 @@ def dash_plot_2D_planes(
         col=1,
     )
 
-    # Setup axes
     xaxis_def = {
         "mirror": True,
         "ticks": "outside",
@@ -367,8 +332,6 @@ def dash_plot_2D_planes(
     }
 
     fig_kwargs = {"showlegend": True}
-
-    # Update the figure
     fig.update_layout(xaxis=xaxis_def, yaxis=yaxis_def, **fig_kwargs, **style_kwargs)
 
     return fig
@@ -383,26 +346,29 @@ def dash_plot_3D(
     light_mode: bool = True,
 ) -> go.Figure:
     """
-    Render a 3D plotly figure for a given input array
+    Render a 3D plotly figure for a given input array.
     """
+    import numpy as np
+    import plotly.graph_objs as go
+
     img = np.array(img)
     cmin, cmax = get_color_scale(img, saturation)
-    axis_color, marker_color, font_color, style_kwargs = get_style_kwargs(light_mode)
+    axis_color, _marker_color, _font_color, style_kwargs = get_style_kwargs(light_mode)
 
-    N = np.shape(img)
-    x = np.linspace(0, 1, N[0])
-    y = np.linspace(0, 1, N[1])
-    z = np.linspace(0, 1, N[2])
+    shape = np.shape(img)
+    x = np.linspace(0, 1, shape[0])
+    y = np.linspace(0, 1, shape[1])
+    z = np.linspace(0, 1, shape[2])
 
     fig_data = []
 
     if option_3d == "Volume":
-        G = np.meshgrid(x, y, z, indexing="ij")
+        grid = np.meshgrid(x, y, z, indexing="ij")
         fig_data.append(
             go.Volume(
-                x=G[0].flatten(),
-                y=G[1].flatten(),
-                z=G[2].flatten(),
+                x=grid[0].flatten(),
+                y=grid[1].flatten(),
+                z=grid[2].flatten(),
                 value=img.flatten(),
                 opacity=0.1,
                 surface_count=5,
@@ -412,9 +378,9 @@ def dash_plot_3D(
             )
         )
     else:
-        ii = N[0] // 2
-        jj = N[1] // 2
-        kk = N[2] // 2
+        ii = shape[0] // 2
+        jj = shape[1] // 2
+        kk = shape[2] // 2
         xy, xz = np.meshgrid(y, z, indexing="ij")
         xx = np.zeros(np.shape(xy)) + 0.5
         fig_data.append(
@@ -451,7 +417,6 @@ def dash_plot_3D(
             )
         )
 
-    # Setup axes
     scene = {
         "xaxis_title": "X",
         "yaxis_title": "Y",
@@ -462,22 +427,16 @@ def dash_plot_3D(
     }
 
     fig_kwargs = {"showlegend": True, "scene": scene}
-
-    # Update the figure
     fig = go.Figure(data=fig_data)
     fig.update_layout(**fig_kwargs, **style_kwargs)
 
     return fig
 
 
-def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) -> dash.Dash:
-    """
-    Build the ploty dash application
-    """
-    # Configure global app behavior
-    app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME])
+def build_navbar() -> dbc.Navbar:
+    import dash_bootstrap_components as dbc
+    from dash import html
 
-    # Build the navbar
     titlebar = html.A(
         dbc.Row(
             [
@@ -503,38 +462,153 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
         ]
     )
     color_switch = dbc.NavbarBrand([color_mode_switch])
+    app_menu = dbc.DropdownMenu(
+        [
+            dbc.DropdownMenuItem("Load model", id="load-model-button", n_clicks=0),
+            dbc.DropdownMenuItem("Download data", id="download-data-menu-button", n_clicks=0),
+        ],
+        label="Menu",
+        align_end=True,
+        in_navbar=True,
+    )
+    nav_controls = html.Div([color_switch, app_menu], className="d-flex align-items-center gap-2")
 
-    navbar = dbc.Navbar(
-        dbc.Container([titlebar, color_switch], fluid=True),
+    return dbc.Navbar(
+        dbc.Container([titlebar, nav_controls], fluid=True),
         color="dark",
         dark=True,
     )
 
-    # Build the sidebar
-    config_rows = [
-        build_dropdown(DropdownConfig(name="Field", options=fields)),
-        build_dropdown(DropdownConfig(name="Colorscale", options=["Turbo", "Viridis", "Inferno", "gray", "RdBu"])),
-        build_dropdown(DropdownConfig(name="Rendering", options=["2D", "ThreeSlice", "Volume"])),
-        build_slider(SliderConfig(name="Saturation", default=1, min=1, max=10)),
-    ]
-    config_inputs = [
-        Input("dropdown_Colorscale", "value"),
-        Input("dropdown_Rendering", "value"),
-        Input("slider_Saturation", "value"),
-    ]
-    etc_rows = [dbc.Row(html.Button("Download Data", id="download-button", n_clicks=0))]
 
-    slider_rows = [build_slider(s) for s in sliders]
-    slider_inputs = [Input(f"slider_{s.name}", "value") for s in sliders]
+def build_load_model_modal(initial_status: Any = None, is_open: bool = False, app_type: str = "local") -> dbc.Modal:
+    import dash_bootstrap_components as dbc
+    from dash import dcc, html
+
+    modal_rows = []
+    if app_type == "server":
+        modal_rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Upload(
+                            id="config-upload",
+                            children=html.Div(
+                                [
+                                    "Drag and drop or ",
+                                    html.Span(
+                                        "select",
+                                        style={
+                                            "color": "#0d6efd",
+                                            "textDecoration": "underline",
+                                            "cursor": "pointer",
+                                        },
+                                    ),
+                                    " a YAML config or bundle",
+                                ]
+                            ),
+                            multiple=False,
+                            className="border rounded p-4 text-center",
+                        ),
+                        md=6,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Input(
+                                id="server-config-path",
+                                type="text",
+                                placeholder="Server-side config path",
+                            ),
+                            dbc.Button("Load Path", id="load-path-button", n_clicks=0, className="mt-2"),
+                        ],
+                        md=6,
+                    ),
+                ],
+                className="g-3",
+            )
+        )
+
+    elif app_type == "local":
+        modal_rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            dbc.Input(
+                                id="server-config-path",
+                                type="text",
+                                placeholder="Server-side config path",
+                            )
+                        ],
+                        md=6,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Button("Select Model", id="select-path-button", n_clicks=0, className="mt-2"),
+                        ],
+                        md=6,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Button("Load Model", id="load-path-button", n_clicks=0, className="mt-2"),
+                        ],
+                        md=6,
+                    ),
+                ],
+                className="g-3",
+            )
+        )
+
+    else:
+        raise ValueError(f"Unrecognized app type: {app_type}")
+
+    modal_rows.append(dbc.Row(html.Div(id="landing-status", className="mt-3", children=initial_status)))
+
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Load Model Config")),
+            dbc.ModalBody(dbc.Container(modal_rows, fluid=True)),
+            dbc.ModalFooter(dbc.Button("Close", id="close-load-model-modal", n_clicks=0)),
+        ],
+        id="load-model-modal",
+        is_open=is_open,
+        size="lg",
+    )
+
+
+def build_model_panel(payload: dict[str, Any]) -> html.Div:
+    import dash_bootstrap_components as dbc
+    from dash import dcc, html
+
+    instance_id = payload["instance_id"]
+    fields = payload["fields"]
+    sliders = [SliderConfig(**slider) for slider in payload["sliders"]]
+
+    config_rows = [
+        build_dropdown(DropdownConfig(name="Field", options=fields), "field-dropdown", instance_id),
+        build_dropdown(
+            DropdownConfig(name="Colorscale", options=["Turbo", "Viridis", "Inferno", "gray", "RdBu"]),
+            "colorscale-dropdown",
+            instance_id,
+        ),
+        build_dropdown(
+            DropdownConfig(name="Rendering", options=["2D", "ThreeSlice", "Volume"]),
+            "rendering-dropdown",
+            instance_id,
+        ),
+        build_slider(SliderConfig(name="Saturation", default=1, min=1, max=10), instance_id, "plot-slider"),
+    ]
+    slider_rows = [build_slider(slider, instance_id) for slider in sliders]
 
     sidebar = html.Div(
         [
-            html.H4("Config"),
+            html.H4(payload["model_name"]),
+            html.Div(payload["source"], className="small text-muted text-break"),
             html.Hr(),
+            html.H5("Config"),
             html.Div(dbc.Container(config_rows, fluid=True)),
-            html.H4("Parameters"),
+            html.H5("Parameters"),
             html.Hr(),
-            html.Div(dbc.Container(slider_rows + etc_rows, fluid=True)),
+            html.Div(dbc.Container(slider_rows, fluid=True)),
         ],
         style={
             "height": "90vh",
@@ -545,7 +619,6 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
         },
     )
 
-    # Build the figure graph
     graph_config = {
         "toImageButtonOptions": {
             "format": "png",
@@ -558,7 +631,7 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
 
     figure_graph = html.Div(
         dcc.Graph(
-            id="figure-graph",
+            id={"type": "figure-graph", "instance_id": instance_id},
             animate=False,
             responsive=True,
             config=graph_config,
@@ -567,40 +640,246 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
         )
     )
 
-    # Build the app layout
-    data_store = dcc.Store(id="model-results", storage_type="server", data={})
-    plot_data = dcc.Store(id="plot-data", storage_type="memory", data={})
-    download_file = dcc.Download(id="download-file")
-    win_content = dbc.Row([dbc.Col(sidebar, width=4), dbc.Col(figure_graph, width=8)], justify="center")
-    win = dbc.Container(win_content, fluid=True)
-    app.layout = html.Div(id="interface-container", children=[data_store, plot_data, download_file, navbar, win])
+    return html.Div(
+        [
+            dcc.Store(id={"type": "model-config", "instance_id": instance_id}, storage_type="memory", data=payload),
+            dcc.Store(id={"type": "model-results", "instance_id": instance_id}, storage_type="memory", data={}),
+            dcc.Store(id={"type": "plot-data", "instance_id": instance_id}, storage_type="memory", data={}),
+            dbc.Container(
+                dbc.Row([dbc.Col(sidebar, width=4), dbc.Col(figure_graph, width=8)], justify="center"),
+                fluid=True,
+            ),
+        ]
+    )
 
-    # Build app callbacks
-    @app.callback(Output("model-results", "data"), slider_inputs)
-    def update_model(*inputs: float):
-        tmp = prof_model.run(inputs)
+
+def build_status(message: str, color: str = "danger") -> dbc.Alert:
+    import dash_bootstrap_components as dbc
+
+    return dbc.Alert(message, color=color, dismissable=True)
+
+
+def build_application(initial_config: str | None = None, app_type: str = "local") -> dash.Dash:
+    """
+    Build the plotly Dash application.
+    """
+    import dash
+    import dash_bootstrap_components as dbc
+    import numpy as np
+    import plotly.graph_objs as go
+    from dash import ALL, MATCH, Input, Output, State, clientside_callback, dcc, html
+
+    from professor.file_io import (
+        RESULT_SIZE_LIMIT,
+        build_config_payload_from_path,
+        build_config_payload_from_upload,
+        write_hdf5,
+    )
+    from professor.gui.model_cache import decode_array, encode_array, model_cache, result_cache
+
+    app = dash.Dash(
+        __name__,
+        external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME],
+        suppress_callback_exceptions=True,
+    )
+
+    def serve_layout() -> html.Div:
+        session_id = str(uuid.uuid4())
+        active_payload = None
+        initial_panel = html.Div()
+        initial_status = html.Div()
+        if initial_config is not None:
+            try:
+                active_payload = build_config_payload_from_path(initial_config, session_id)
+                initial_panel = build_model_panel(active_payload)
+                initial_status = build_status(f"Loaded {active_payload['source']}", color="success")
+            except Exception as exc:  # noqa: BLE001
+                initial_status = build_status(str(exc))
+
+        return html.Div(
+            id="interface-container",
+            children=[
+                dcc.Store(id="session-id", storage_type="memory", data=session_id),
+                dcc.Store(id="active-model", storage_type="memory", data=active_payload),
+                dcc.Download(id="download-file"),
+                build_navbar(),
+                build_load_model_modal(initial_status, is_open=initial_config is None, app_type=app_type),
+                html.Div(id="visualization-container", children=initial_panel),
+            ],
+        )
+
+    app.layout = serve_layout
+
+    @app.callback(
+        Output("load-model-modal", "is_open"),
+        Input("load-model-button", "n_clicks"),
+        Input("close-load-model-modal", "n_clicks"),
+        State("load-model-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def toggle_load_model_modal(load_clicks: int, close_clicks: int, is_open: bool) -> bool:
+        triggered_id = dash.ctx.triggered_id
+        if triggered_id == "load-model-button":
+            return True
+        if triggered_id == "close-load-model-modal":
+            return False
+        return is_open
+
+    if app_type == "server":
+
+        @app.callback(
+            Output("active-model", "data"),
+            Output("visualization-container", "children"),
+            Output("landing-status", "children"),
+            Input("config-upload", "contents"),
+            Input("load-path-button", "n_clicks"),
+            State("config-upload", "filename"),
+            State("server-config-path", "value"),
+            State("session-id", "data"),
+            State("active-model", "data"),
+            prevent_initial_call=True,
+        )
+        def load_config_server(
+            upload_contents: str | None,
+            n_clicks: int,
+            upload_filename: str | None,
+            server_config_path: str | None,
+            session_id: str,
+            active_payload: dict[str, Any] | None,
+        ):
+            triggered_id = dash.ctx.triggered_id
+            try:
+                if triggered_id == "config-upload":
+                    if upload_contents is None or upload_filename is None:
+                        raise ValueError("No uploaded config was provided.")
+                    payload = build_config_payload_from_upload(upload_contents, upload_filename, session_id)
+                else:
+                    if not server_config_path:
+                        raise ValueError("Enter a server-side config path before loading.")
+                    payload = build_config_payload_from_path(server_config_path, session_id)
+            except Exception as exc:  # noqa: BLE001
+                return dash.no_update, dash.no_update, build_status(str(exc))
+
+            if active_payload is not None:
+                result_cache.release_instance(active_payload["instance_id"])
+                model_cache.release_session(session_id)
+            return payload, build_model_panel(payload), build_status(f"Loaded {payload['source']}", color="success")
+
+    elif app_type == "local":
+
+        @app.callback(
+            Output("server-config-path", "value"),
+            Input("select-path-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def select_config_path(
+            n_clicks: int,
+        ):
+            return get_file_path()
+
+        @app.callback(
+            Output("active-model", "data"),
+            Output("visualization-container", "children"),
+            Output("landing-status", "children"),
+            Input("load-path-button", "n_clicks"),
+            State("server-config-path", "value"),
+            State("session-id", "data"),
+            State("active-model", "data"),
+            prevent_initial_call=True,
+        )
+        def load_config_local(
+            n_clicks: int,
+            server_config_path: str | None,
+            session_id: str,
+            active_payload: dict[str, Any] | None,
+        ):
+            try:
+                if not server_config_path:
+                    raise ValueError("Enter a server-side config path before loading.")
+                payload = build_config_payload_from_path(server_config_path, session_id)
+            except Exception as exc:  # noqa: BLE001
+                return dash.no_update, dash.no_update, build_status(str(exc))
+
+            if active_payload is not None:
+                result_cache.release_instance(active_payload["instance_id"])
+                model_cache.release_session(session_id)
+            return payload, build_model_panel(payload), build_status(f"Loaded {payload['source']}", color="success")
+
+    else:
+        raise ValueError(f"Unrecognized app type: {app_type}")
+
+    @app.callback(
+        Output({"type": "model-results", "instance_id": MATCH}, "data"),
+        Input({"type": "model-slider", "instance_id": MATCH, "name": ALL}, "value"),
+        State({"type": "model-slider", "instance_id": MATCH, "name": ALL}, "id"),
+        State({"type": "model-config", "instance_id": MATCH}, "data"),
+        State("active-model", "data"),
+    )
+    def update_model(
+        slider_values: list[float],
+        slider_ids: list[dict[str, str]],
+        config_payload: dict[str, Any],
+        active_payload: dict[str, Any] | None,
+    ):
+        if active_payload is None:
+            return dash.no_update
+        if active_payload["instance_id"] != config_payload["instance_id"]:
+            return dash.no_update
+
+        values_by_name = {}
+        for slider_id, value in zip(slider_ids, slider_values):
+            values_by_name[slider_id["name"]] = value
+
+        model_args = []
+        for name in config_payload["slider_order"]:
+            model_args.append(values_by_name[name])
+
+        try:
+            helper = model_cache.get_or_load(config_payload, config_payload["session_id"])
+            tmp = helper.run(model_args)
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
         if tmp.size == 1:
             return {}
 
-        res: dict[str, Any] = {"shape": np.shape(tmp)[2:]}
-        for ii, k in enumerate(fields):
-            res[k] = encode_array(tmp[0, ii, ...])
-        return res
-
-    # Note: this callback is used to limit the data transfer from the cached results
-    # on the server to the client side cache
-    @app.callback(Output("plot-data", "data"), Input("model-results", "data"), Input("dropdown_Field", "value"))
-    def update_plot_data(model_results: dict[str, Any], field: str) -> dict[str, Any]:
-        if field in model_results:
-            return {field: model_results[field], "shape": model_results["shape"], "field": field}
-        else:
-            return {}
+        result_metadata = result_cache.put(config_payload["instance_id"], config_payload["fields"], tmp)
+        return {
+            "token": result_metadata["token"],
+            "shape": result_metadata["shape"],
+            "fields": result_metadata["fields"],
+        }
 
     @app.callback(
-        Output("figure-graph", "figure"),
-        Input("plot-data", "data"),
+        Output({"type": "plot-data", "instance_id": MATCH}, "data"),
+        Input({"type": "model-results", "instance_id": MATCH}, "data"),
+        Input({"type": "field-dropdown", "instance_id": MATCH}, "value"),
+    )
+    def update_plot_data(model_results: dict[str, Any], field: str) -> dict[str, Any]:
+        if not model_results:
+            return {}
+        if "error" in model_results:
+            return model_results
+        token = model_results.get("token")
+        if token is not None:
+            img = result_cache.get_array(token, field)
+            if img is None:
+                return {"error": "Model result expired. Adjust a parameter to rerun inference."}
+            encoded_img = encode_array(img)
+            if len(encoded_img) > RESULT_SIZE_LIMIT:
+                return {"error": f"Selected field '{field}' is too large for browser storage."}
+            return {field: encoded_img, "shape": model_results["shape"], "field": field}
+        if field in model_results:
+            return {field: model_results[field], "shape": model_results["shape"], "field": field}
+        return {}
+
+    @app.callback(
+        Output({"type": "figure-graph", "instance_id": MATCH}, "figure"),
+        Input({"type": "plot-data", "instance_id": MATCH}, "data"),
         Input("light-mode-switch", "value"),
-        config_inputs,
+        Input({"type": "colorscale-dropdown", "instance_id": MATCH}, "value"),
+        Input({"type": "rendering-dropdown", "instance_id": MATCH}, "value"),
+        Input({"type": "plot-slider", "instance_id": MATCH, "name": "Saturation"}, "value"),
     )
     def render_figure(
         data: dict[str, Any],
@@ -609,45 +888,46 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
         rendering_style: str,
         saturation: float,
     ) -> go.Figure:
-        if not len(data):
+        if not data:
             return dash.no_update
+        if "error" in data:
+            fig = go.Figure()
+            fig.add_annotation(text=data["error"], x=0.5, y=0.5, showarrow=False)
+            return fig
 
-        # Rebuild the image from raw numpy bytes object from the local data store
         field = data["field"]
         img = decode_array(data[field], data["shape"])  # type: ignore
         if len(np.shape(img)) == 2:
             return dash_plot_2D(img, label=field, colorscale=colorscale, saturation=saturation, light_mode=light_mode)
-        elif rendering_style == "2D":
+        if rendering_style == "2D":
             return dash_plot_2D_planes(
                 img, label=field, colorscale=colorscale, saturation=saturation, light_mode=light_mode
             )
-        else:
-            return dash_plot_3D(
-                img,
-                label=field,
-                colorscale=colorscale,
-                saturation=saturation,
-                option_3d=rendering_style,
-                light_mode=light_mode,
-            )
+        return dash_plot_3D(
+            img,
+            label=field,
+            colorscale=colorscale,
+            saturation=saturation,
+            option_3d=rendering_style,
+            light_mode=light_mode,
+        )
 
     @app.callback(
         Output("download-file", "data"),
-        Input("download-button", "n_clicks"),
-        State("model-results", "data"),
+        Input("download-data-menu-button", "n_clicks"),
+        State("active-model", "data"),
         prevent_initial_call=True,
     )
-    def download_data(nclicks: int, data: dict[str, np.ndarray]):
-        with h5py.File("model_data.h5", "w") as f:
-            for k, v in data.items():
-                if k != "shape":
-                    img = decode_array(v, data["shape"])  # type: ignore
-                    f.create_dataset(
-                        k,
-                        data=img,
-                        dtype=np.float32,
-                    )
-        return dcc.send_file("model_data.h5")
+    def download_data(nclicks: int, active_payload: dict[str, Any] | None):
+        if active_payload is None:
+            return dash.no_update
+        cached_result = result_cache.get_result_for_instance(active_payload["instance_id"])
+        if cached_result is None:
+            return dash.no_update
+
+        filename = f"{active_payload['model_name']}-{active_payload['config_hash'][:12]}.h5"
+        write_result = partial(write_hdf5, fields=cached_result.fields, arrays=cached_result.arrays)
+        return dcc.send_bytes(write_result, filename)
 
     clientside_callback(
         """
@@ -663,15 +943,15 @@ def build_application(fields: list[str] = [], sliders: list[SliderConfig] = []) 
     return app
 
 
-def main():
+def main() -> None:
     """
-    Parse user arguments, then build and launch the application
+    Parse user arguments, then build and launch the application.
     """
     parser = argparse.ArgumentParser(
         prog="prof-dash-gui",
         description="Professor dash visualization",
     )
-    parser.add_argument("config", type=str, help="Model configuration file")
+    parser.add_argument("config", nargs="?", type=str, help="Model configuration file")
     parser.add_argument(
         "-p",
         "--port",
@@ -679,18 +959,23 @@ def main():
         type=int,
         help="Target port",
     )
+    parser.add_argument(
+        "--app-type",
+        default="local",
+        type=str,
+        choices=("local", "server"),
+        help="Application type",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="Run the Dash dashboard in debug mode",
+    )
     args = parser.parse_args()
 
-    fields, slider_config = prof_model.load(args.config)
-    sliders = []
-    for k, s in slider_config.items():
-        ds = 1e-3 * (s["upper_bound"] - s["lower_bound"])
-        sliders.append(
-            SliderConfig(name=k, default=s["initial_value"], min=s["lower_bound"], max=s["upper_bound"], step=ds)
-        )
-
-    app = build_application(fields, sliders)
-    app.run(port=args.port, debug=False)
+    app = build_application(args.config, args.app_type)
+    app.run(host="127.0.0.1", port=args.port, debug=args.debug)
 
 
 if __name__ == "__main__":

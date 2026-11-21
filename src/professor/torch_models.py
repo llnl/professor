@@ -1121,9 +1121,7 @@ class GenResizeResNet(nn.Module):
         max_kernel = max(y_kernel, x_kernel)
         n_stages = int(round(np.log2(im_size / max_kernel)))
         if n_stages < 1 or max_kernel * 2**n_stages != im_size:
-            raise ValueError(
-                f"im_size ({im_size}) must be max(y_kernel, x_kernel) ({max_kernel}) times a power of 2"
-            )
+            raise ValueError(f"im_size ({im_size}) must be max(y_kernel, x_kernel) ({max_kernel}) times a power of 2")
         output_shape = (y_kernel * 2**n_stages, x_kernel * 2**n_stages)
         field_shape = (y_pixels or output_shape[0], x_pixels or output_shape[1])
         if output_shape != field_shape:
