@@ -59,6 +59,49 @@ copy only the executable by itself.
 Build separately on Linux, macOS, and Windows. To request a specific Electron
 Builder target, append its option, for example `npm run package -- --linux dir`.
 
+### Automated Apple Silicon build
+
+On a native arm64 Mac, install Xcode Command Line Tools and the Homebrew build
+libraries, then run the build script from this directory:
+
+```console
+brew install openssl@3 readline sqlite xz tcl-tk pkgconf
+ELECTRON_BUILD_ROOT="$PWD/build" ./build_scripts/build_electron_app_macos.sh
+```
+
+The script builds the pinned Python version and packages an arm64 `.app`. It
+prints the resulting app path when the build completes.
+
+### Linux and HPC builds
+
+`build_scripts/build_electron_app.sh` builds on Linux x86-64. Load the compiler
+toolchain you want to use, then provide an absolute build root and a compiler
+label:
+
+```console
+ELECTRON_BUILD_ROOT="$PWD/build" \
+COMPILER_ID=gcc-13.3.1-magic \
+./build_scripts/build_electron_app.sh
+```
+
+`COMPILER_ID` labels the installed Python and virtual environment; set `CC` and
+`CXX` or load a compiler module to select the actual compiler. The script uses
+the CPU PyTorch wheel index by default. It prints the release directory inside
+the fresh Professor checkout when the build completes.
+
+The scheduler wrappers load the site compiler and accelerator modules and set
+their own build roots and Python package versions:
+
+| Script | Submit command | Build configuration |
+| --- | --- | --- |
+| `build_scripts/build_electron_app_dane.sbatch` | `sbatch build_scripts/build_electron_app_dane.sbatch` | Slurm CPU build with GCC 13.3.1. |
+| `build_scripts/build_electron_app_tuolumne.flux` | `flux batch build_scripts/build_electron_app_tuolumne.flux` | Flux build with ROCm 7.2.1 and its matching PyTorch wheel index. |
+
+Both wrappers use `$USER` to select the per-user Lustre root and shared build
+script path. They still assume the site mounts and the `MADA/professor` checkout
+layout. Slurm writes `electron_build_dane.out` and `electron_build_dane.err`;
+Flux writes `electron_build_tuolumne.out` and `electron_build_tuolumne.err`.
+
 ## Passing user configuration files
 
 The packaged application accepts the same command-line arguments as the Python
