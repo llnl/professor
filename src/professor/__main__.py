@@ -114,8 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--loss_target",
         default="l1",
         type=str,
-        help="Pointwise term of the loss: 'l1' for mean absolute error, or 'l2' for mean squared error."
-        " Default is l1",
+        help="Pointwise term of the loss: 'l1' for mean absolute error, or 'l2' for mean squared error. Default is l1",
     )
     parser.add_argument(
         "--grad_weight",

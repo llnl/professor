@@ -831,9 +831,7 @@ def main(args: argparse.Namespace) -> None:
         return output, MyLoss(output, target) + sobolev_weight * loss_sobolev, loss_sobolev.detach()
 
     if rank == 0:
-        print(
-            f"loss: {loss_target} + {grad_weight} * pixel differences + {pyr_weight} * pyramid ({pyr_levels} levels)"
-        )
+        print(f"loss: {loss_target} + {grad_weight} * pixel differences + {pyr_weight} * pyramid ({pyr_levels} levels)")
 
     n_train_loader = len(train_loader)
     n_train_data = size * batch_size * n_train_loader * n_channels * n_pixels_y * n_pixels_x  # noqa E:501
