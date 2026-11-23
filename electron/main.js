@@ -3,6 +3,9 @@ const { spawn } = require("child_process");
 const http = require("http");
 const path = require("path");
 
+// Allow WebGL plots to fall back to software rendering when hardware WebGL is unavailable.
+app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+
 let dashProcess;
 let mainWindow;
 let splashWindow;
