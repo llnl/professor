@@ -140,6 +140,7 @@ class TestExecutionSchema:
         res = ExecutionSchema(execution_conf).val
         assert res == {
             Keys.HALF_PRECISION.value: True,
+            Keys.PARAMETRIC_SLICES.value: 0,
             Keys.JIT.value: True,
         }
 
@@ -148,6 +149,7 @@ class TestExecutionSchema:
         res = ExecutionSchema(execution_conf).val
         assert res == {
             Keys.HALF_PRECISION.value: True,
+            Keys.PARAMETRIC_SLICES.value: 0,
             Keys.JIT.value: True,
         }
 
@@ -155,6 +157,7 @@ class TestExecutionSchema:
         res = ExecutionSchema({}).val
         assert res == {
             Keys.HALF_PRECISION.value: True,
+            Keys.PARAMETRIC_SLICES.value: 0,
             Keys.JIT.value: True,
         }
 
@@ -211,6 +214,7 @@ class TestModelSchema:
         res = ModelSchema(pytorch_conf).val
         assert res[Keys.EXECUTION.value] == {
             Keys.HALF_PRECISION.value: True,
+            Keys.PARAMETRIC_SLICES.value: 0,
             Keys.JIT.value: True,
         }
 

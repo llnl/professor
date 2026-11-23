@@ -14,7 +14,7 @@ this tutorial:
 
 | Argument | Purpose in this tutorial |
 | --- | --- |
-| `--generator-type` | Selects `3D-triplane` or `3D-voxel` |
+| `--generator-type` | Selects `3D-triplane` or `3D-voxel`; `legacy` and `2D` enable the parametric 2D approach for 3D datasets |
 | `--x_kernel`, `--y_kernel`, `--z_kernel` | Sets the initial learned spatial extent; all are 4 for the cubic data |
 | `--upscale-type` | Uses `nearest` interpolation followed by convolution in these examples; `transpose` and `linear` are also supported |
 | `--max_feature`, `--min_feature` | Bounds intermediate channel counts and controls much of the memory/capacity tradeoff |
@@ -23,6 +23,20 @@ this tutorial:
 | `--run_directory` | Places checkpoints and logs in a predictable directory and resumes from its newest checkpoint |
 | `--vis-config` | Creates a configuration for `prof-dash-gui` and updates its checkpoint path during training |
 | `--batch_multiplier N` | Increases the effective batch size through accumulation |
+
+### Parametric 2D training
+
+Native 3D generators are not required for a 3D dataset. Selecting
+`--generator-type legacy` or `--generator-type 2D` makes the trainer slice each
+3D target along z and append the slice's normalized z position to the input
+vector. The target presented to the model is therefore a 2D plane, while the
+underlying dataset remains a 3D HDF5 dataset. When `--vis-config` is used, the
+generated configuration records the number of z slices so visualization can
+reconstruct the complete volume.
+
+This option can substantially reduce memory use, but each z plane is predicted
+independently. Use `3D-triplane` or `3D-voxel` when interactions between nearby
+z planes are important to the model.
 
 
 In the following section, we will cover two different types of 3D generator models.

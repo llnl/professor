@@ -7,7 +7,7 @@ from professor.vela.model import PyTorchModel
 
 # from omegaconf import OmegaConf
 from omegaconf import OmegaConf
-from professor.vela.config import Config
+from professor.vela.config import Config, Keys
 import pytest
 
 """
@@ -44,7 +44,9 @@ def test_load_cfg(model_mock):
     expected_dimensions["z_pixels"] = 1
     assert model_mock._config.dimensions == expected_dimensions
     assert model_mock._config.invocation == MOCK_CONFIG["model"]["pytorch"]["invocation"]
-    assert model_mock._config.execution == MOCK_CONFIG["model"]["pytorch"]["execution"]
+    expected_execution = dict(MOCK_CONFIG["model"]["pytorch"]["execution"])
+    expected_execution[Keys.PARAMETRIC_SLICES.value] = 0
+    assert model_mock._config.execution == expected_execution
     assert model_mock._config.gui == MOCK_CONFIG["gui"]["napari"]
 
 
